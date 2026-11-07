@@ -42,6 +42,14 @@ struct PortMallocRegion {
 };
 extern PortMallocRegion gSYTaskmanGeneralHeap;
 
+struct PortAudioHeap { // libaudio ALHeap
+    uint8_t *base;
+    uint8_t *cur;
+    int32_t len;
+    int32_t count;
+};
+extern PortAudioHeap sSYAudioHeap;
+
 size_t port_coroutine_snapshot_size(void);
 size_t port_coroutine_snapshot_save(uint8_t *dst, size_t capacity);
 void port_coroutine_snapshot_restore(const uint8_t *src, size_t size);
@@ -70,6 +78,7 @@ struct GameSnapshot {
     std::vector<uint8_t> data;
     std::vector<uint8_t> bss;
     std::vector<uint8_t> arena;
+    std::vector<uint8_t> audio; // allocated part of the audio heap
     std::vector<uint8_t> stacks;
     size_t relocMark = 0; // reloc token table journal position
     std::shared_ptr<const PortFixupState> fixups; // in-place fixup trackers
@@ -96,13 +105,24 @@ bool FindSections() {
     return sSectionsFound;
 }
 
+// Copy into a snapshot buffer, keeping headroom so the slow growth of the
+// heaps never reallocates (and re-faults) the buffer.
+void CopyInto(std::vector<uint8_t> &dst, const uint8_t *src, size_t size) {
+    if (dst.capacity() < size) {
+        dst.reserve(size + 256 * 1024);
+    }
+    dst.resize(size);
+    std::memcpy(dst.data(), src, size);
+}
+
 void Save(GameSnapshot &snap) {
-    snap.data.assign(sData.base, sData.base + sData.size);
-    snap.bss.assign(sBss.base, sBss.base + sBss.size);
+    CopyInto(snap.data, sData.base, sData.size);
+    CopyInto(snap.bss, sBss.base, sBss.size);
 
     const auto *start = static_cast<const uint8_t *>(gSYTaskmanGeneralHeap.start);
     const auto *ptr = static_cast<const uint8_t *>(gSYTaskmanGeneralHeap.ptr);
-    snap.arena.assign(start, ptr);
+    CopyInto(snap.arena, start, static_cast<size_t>(ptr - start));
+    CopyInto(snap.audio, sSYAudioHeap.base, static_cast<size_t>(sSYAudioHeap.cur - sSYAudioHeap.base));
 
     snap.stacks.resize(port_coroutine_snapshot_size());
     snap.stacks.resize(port_coroutine_snapshot_save(snap.stacks.data(), snap.stacks.size()));
@@ -124,6 +144,9 @@ void Restore(const GameSnapshot &snap) {
     if (arenaEnd > start + snap.arena.size()) {
         std::memset(start + snap.arena.size(), 0, arenaEnd - (start + snap.arena.size()));
     }
+
+    // The audio heap only grows at load time; copy back what was allocated.
+    std::memcpy(sSYAudioHeap.base, snap.audio.data(), snap.audio.size());
 
     port_coroutine_snapshot_restore(snap.stacks.data(), snap.stacks.size());
     portRelocJournalUndoTo(snap.relocMark);
@@ -262,8 +285,12 @@ extern "C" void port_rollback_synctest_end(void (*resimulate_frame)(void)) {
                  "resim(all %d)=%.0fus snapshot=%zuKB (arena %zuKB, stacks %zuKB)\n",
                  sSyncTestFrames, sSyncTestDepth, sSyncTestMismatches, sSaveUsecs / sSyncTestFrames,
                  sRestoreUsecs / sSyncTestFrames, sSyncTestDepth, sResimUsecs / sSyncTestFrames,
-                 (snap.data.size() + snap.bss.size() + snap.arena.size() + snap.stacks.size()) / 1024,
+                 (snap.data.size() + snap.bss.size() + snap.arena.size() + snap.audio.size() + snap.stacks.size()) /
+                     1024,
                  snap.arena.size() / 1024, snap.stacks.size() / 1024);
+        port_log("SSB64 Rollback: snapshot parts data=%zuKB bss=%zuKB arena=%zuKB audio=%zuKB stacks=%zuKB\n",
+                 snap.data.size() / 1024, snap.bss.size() / 1024, snap.arena.size() / 1024, snap.audio.size() / 1024,
+                 snap.stacks.size() / 1024);
     }
 }
 
@@ -283,6 +310,7 @@ bool sRbRingCleared;
 bool sRbArmed;
 uint32_t sRbRollbacks, sRbResimFrames, sRbMaxDepth, sRbTooDeep, sRbFrames;
 double sRbUsecs;
+double sRbSaveUsecs;
 
 void RbClearRing() {
     for (uint32_t &t : sRbRingTick) {
@@ -344,7 +372,9 @@ extern "C" int port_rollback_frame_begin(void (*resimulate_frame)(void)) {
             }
         }
     }
+    auto saveStart = std::chrono::steady_clock::now();
     Save(sRbRing[tick % kRing]);
+    sRbSaveUsecs += UsecsSince(saveStart);
     sRbRingTick[tick % kRing] = tick;
 
     const uint32_t oldest = (tick >= kRing - 1) ? tick - (kRing - 1) : 0;
@@ -365,9 +395,9 @@ extern "C" void port_rollback_frame_end(void) {
     }
     if (++sRbFrames % 600 == 0) {
         port_log("SSB64 Rollback: frames=%u rollbacks=%u resimulated=%u (avg depth %.1f, max %u) too_deep=%u "
-                 "avg rollback=%.0fus\n",
+                 "avg rollback=%.0fus avg save=%.0fus\n",
                  sRbFrames, sRbRollbacks, sRbResimFrames,
                  sRbRollbacks ? (double)sRbResimFrames / sRbRollbacks : 0.0, sRbMaxDepth, sRbTooDeep,
-                 sRbRollbacks ? sRbUsecs / sRbRollbacks : 0.0);
+                 sRbRollbacks ? sRbUsecs / sRbRollbacks : 0.0, sRbSaveUsecs / sRbFrames);
     }
 }
