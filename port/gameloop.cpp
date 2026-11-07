@@ -111,6 +111,8 @@ static inline OSMesg port_make_os_mesg_int(uint32_t code)
 /*  Game coroutine state                                                     */
 /* ========================================================================= */
 
+extern "C" int syNetPeerTakeTimeSyncSkip(void);
+
 static PortCoroutine *sGameCoroutine = NULL;
 
 /* VI frame counter (incremented once per PortPushFrame, below). Lives up here
@@ -718,8 +720,12 @@ void PortPushFrame(void)
 	 * intros and the desk-to-stage transition would never appear. Run
 	 * this BEFORE posting INTR_VRETRACE so old gfx completions are
 	 * delivered before the next game tick can tear down scene memory. */
-	const int rollbackFrame = port_rollback_frame_begin(PortResimulateFrame);
-	const int rollbackSyncTest = rollbackFrame ? 0 : port_rollback_synctest_begin();
+	/* Rollback time sync: the side running ahead of its peer skips a game
+	 * step now and then, re-presenting the last frame (idle path below). */
+	const int timeSyncSkip = syNetPeerTakeTimeSyncSkip();
+	const int rollbackFrame = timeSyncSkip ? 0 : port_rollback_frame_begin(PortResimulateFrame);
+	const int rollbackSyncTest = (rollbackFrame || timeSyncSkip) ? 0 : port_rollback_synctest_begin();
+	if (!timeSyncSkip) {
 	port_vi_simulate_vblank();
 
 	/* Post a VI retrace event to the scheduler's message queue. See
@@ -746,6 +752,7 @@ void PortPushFrame(void)
 	}
 	if (rollbackFrame) {
 		port_rollback_frame_end();
+	}
 	}
 
 	port_enhancement_stage_hazards_tick();
