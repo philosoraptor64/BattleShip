@@ -28,8 +28,11 @@ function(ssb64_compute_netplay_build_id src out_var)
                         OUTPUT_VARIABLE id OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
         string(APPEND parts "${path}=${id}\n")
     endforeach()
-    # Their uncommitted edits.
+    # Their uncommitted edits. port/assets is left out: the build regenerates
+    # its scroll-arrow PNGs in place, and different Pillow versions write
+    # different bytes for the same image (menu art, not gameplay).
     execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${src}" diff HEAD -- port include yamls config.yml CMakeLists.txt
+                            ":(exclude)port/assets"
                     OUTPUT_VARIABLE diff ERROR_QUIET)
     string(APPEND parts "${diff}")
     # The submodules as checked out (not just as recorded), plus their edits.
