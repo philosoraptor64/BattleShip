@@ -22,6 +22,19 @@
 	<string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- Invite links: battleship-net://join?s=<server>&r=<room>&p=<password>
+	     (port/port_ios_url.mm -> port_ios_handle_open_url). -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>${MACOSX_BUNDLE_GUI_IDENTIFIER}.invite</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>battleship-net</string>
+			</array>
+		</dict>
+	</array>
 	<!-- Without this, iOS silently drops LAN traffic (netplay). -->
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>BattleShip connects to other players on your local network for netplay.</string>

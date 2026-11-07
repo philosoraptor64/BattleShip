@@ -256,6 +256,11 @@ elseif (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     add_custom_target(TorchExternal)
     set(TORCH_EXECUTABLE "${SSB64_IOS_HOST_TORCH}")
     set(TORCH_SIDECAR_NAME torch)
+    # Also build Torch as a static library for the device, so the app can
+    # extract BattleShip.o2r from the player's own ROM on first launch
+    # (port/port_ios.cpp -> torch_extract_o2r in android_torch_bridge.cpp).
+    set(USE_STANDALONE OFF CACHE BOOL "" FORCE)
+    add_subdirectory(torch ${CMAKE_BINARY_DIR}/torch)
 else()
     # Desktop: build Torch as a host executable via ExternalProject so it
     # can run at our build time to extract ROM assets.
@@ -534,7 +539,11 @@ file(GLOB_RECURSE SSB64_SRC_WP      "decomp/src/wp/*.c"      "decomp/src/wp/*.h"
 # symbol a decomp TU references) must be picked up by already-configured build
 # dirs, or a plain `cmake --build` after pulling hits an undefined-reference
 # link error against a stale glob.
-file(GLOB_RECURSE SSB64_SRC_PORT CONFIGURE_DEPENDS "port/*.cpp" "port/*.c" "port/*.h")
+file(GLOB_RECURSE SSB64_SRC_PORT CONFIGURE_DEPENDS "port/*.cpp" "port/*.c" "port/*.h" "port/*.mm")
+# Objective-C++ glue (UIKit) is iOS-only.
+if (NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    list(FILTER SSB64_SRC_PORT EXCLUDE REGEX "\\.mm$")
+endif()
 list(FILTER SSB64_SRC_PORT EXCLUDE REGEX "port/stubs/")
 # RelocFileTable.{us,jp}.cpp both define gRelocFileTable — compile only the
 # selected version's table (the rest are siblings for the other version).
@@ -569,7 +578,8 @@ endif()
 if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     # Same desktop-only features as Android (see above); the matching menu
     # entries are gated on BATTLESHIP_IOS in port/gui/PortMenu.cpp.
-    list(FILTER SSB64_SRC_PORT EXCLUDE REGEX "port/android_torch_bridge\\.cpp$")
+    # android_torch_bridge.cpp stays: its torch_extract_o2r() is the
+    # on-device extractor on iOS too (the JNI wrapper is Android-only).
     list(FILTER SSB64_SRC_PORT EXCLUDE REGEX
         "port/enhancements/(Updater|DiscordRichPresence|ShaderDownloader)\\.cpp$")
     list(FILTER SSB64_SRC_PORT EXCLUDE REGEX "port/port_window_icon\\.cpp$")
@@ -1578,7 +1588,18 @@ endif()
 # and drop the desktop-only extraction inputs (incl. the macOS torch binary,
 # which must not ship inside an iOS bundle).
 if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    # OFF builds an app that contains nothing derived from the ROM, so it may
+    # be given to other people: each player's app extracts BattleShip.o2r
+    # from their own ROM on first launch (see port/port_ios.cpp).
+    option(SSB64_IOS_BUNDLE_ROM_ASSETS "Bundle the ROM-derived BattleShip.o2r and stage images in the iOS app" ON)
+    target_link_libraries(${PROJECT_NAME} PRIVATE torch)
     set(_ios_app "$<TARGET_BUNDLE_DIR:${PROJECT_NAME}>")
+    set(_ios_strip_rom_assets "")
+    if (NOT SSB64_IOS_BUNDLE_ROM_ASSETS)
+        set(_ios_strip_rom_assets
+            COMMAND ${CMAKE_COMMAND} -E rm -f "${_ios_app}/GameData/${SSB64_APP_NAME}.o2r"
+            COMMAND ${CMAKE_COMMAND} -E rm -rf "${_ios_app}/GameData/assets/css_icons")
+    endif()
     add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E rm -rf "${_ios_app}/GameData"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${_ios_app}/GameData"
@@ -1586,7 +1607,11 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
         COMMAND ${CMAKE_COMMAND} -E rename "${_ios_app}/f3d.o2r" "${_ios_app}/GameData/f3d.o2r"
         COMMAND ${CMAKE_COMMAND} -E rename "${_ios_app}/gamecontrollerdb.txt" "${_ios_app}/GameData/gamecontrollerdb.txt"
         COMMAND ${CMAKE_COMMAND} -E rename "${_ios_app}/assets" "${_ios_app}/GameData/assets"
-        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_ios_app}/torch" "${_ios_app}/config.yml" "${_ios_app}/yamls"
-        COMMENT "iOS: moving game data into the bundle's GameData/"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_ios_app}/torch" "${_ios_app}/TorchRecipe"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_ios_app}/TorchRecipe"
+        COMMAND ${CMAKE_COMMAND} -E rename "${_ios_app}/config.yml" "${_ios_app}/TorchRecipe/config.yml"
+        COMMAND ${CMAKE_COMMAND} -E rename "${_ios_app}/yamls" "${_ios_app}/TorchRecipe/yamls"
+        ${_ios_strip_rom_assets}
+        COMMENT "iOS: moving game data into the bundle's GameData/ and Torch recipes into TorchRecipe/"
     )
 endif()

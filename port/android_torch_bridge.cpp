@@ -6,12 +6,15 @@
 // that the first-run Activity loads to extract a ROM the user picked
 // via the Storage Access Framework.
 //
-// This file is only built on Android (gated in the root CMakeLists.txt).
+// iOS links the same torch_extract_o2r() into the app (port/port_ios.cpp
+// calls it on first launch with a ROM from the app's Documents folder); the
+// JNI wrapper and logcat routing are Android-only.
+//
 // It deliberately avoids any SDL2 / libultraship deps — libtorch_runner.so
 // must be loadable BEFORE SDLActivity is set up, otherwise SDL2's
 // JNI_OnLoad would trip over the missing SDLActivity Java class.
 
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(BATTLESHIP_IOS)
 
 #include "Companion.h"
 
@@ -19,10 +22,13 @@
 #include "n64graphics/n64graphics.h"
 
 #include "spdlog/spdlog.h"
+#if defined(__ANDROID__)
 #include "spdlog/sinks/android_sink.h"
-
 #include <android/log.h>
 #include <jni.h>
+#else
+#include "spdlog/sinks/basic_file_sink.h"
+#endif
 
 #include <algorithm>
 #include <cstdio>
@@ -36,8 +42,14 @@
 #include <vector>
 
 #define LOG_TAG "ssb64.torch"
+#if defined(__ANDROID__)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#else
+extern "C" void port_log(const char *fmt, ...);
+#define LOGI(fmt, ...) port_log("torch: " fmt "\n", ##__VA_ARGS__)
+#define LOGE(fmt, ...) port_log("torch: ERROR " fmt "\n", ##__VA_ARGS__)
+#endif
 
 namespace {
 
@@ -483,9 +495,16 @@ int torch_extract_o2r(const char *rom_path, const char *src_dir, const char *dst
     if (!spdlog_routed) {
         spdlog_routed = true;
         try {
+#if defined(__ANDROID__)
             spdlog::set_default_logger(spdlog::android_logger_mt("torch", LOG_TAG));
+#else
+            // iOS discards stdout; keep Torch's diagnostics next to the output.
+            const std::string log_path = (std::filesystem::path(dst_dir) / "torch.log").string();
+            spdlog::set_default_logger(spdlog::basic_logger_mt("torch", log_path, /*truncate=*/true));
+            spdlog::flush_on(spdlog::level::info);
+#endif
         } catch (const std::exception &e) {
-            LOGE("torch_extract_o2r: could not route spdlog to logcat: %s", e.what());
+            LOGE("torch_extract_o2r: could not route spdlog: %s", e.what());
         }
     }
 
@@ -549,6 +568,7 @@ int torch_extract_o2r(const char *rom_path, const char *src_dir, const char *dst
     }
 }
 
+#if defined(__ANDROID__)
 /* ========================================================================= */
 /*  JNI bridge — called from Java RomImporter on a background thread        */
 /* ========================================================================= */
@@ -590,7 +610,8 @@ Java_com_jrickey_battleship_RomImporter_extractO2R(
 
     return result;
 }
+#endif // __ANDROID__
 
 } // extern "C"
 
-#endif // __ANDROID__
+#endif // __ANDROID__ || BATTLESHIP_IOS
