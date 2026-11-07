@@ -1263,8 +1263,12 @@ int main(int argc, char* argv[]) {
 	 * $XDG_DATA_HOME/BattleShip/) and creates it on demand — same dir
 	 * Ship::Context will later use for the user's saves and o2r. */
 	{
+		/* SSB64_LOG_PATH overrides the location, so several instances on
+		 * one machine (e.g. a local netplay pair) don't share a log. */
 		std::string logPath;
-		if (char* p = SDL_GetPrefPath(NULL, "BattleShip")) {
+		if (const char* env = std::getenv("SSB64_LOG_PATH"); env != nullptr && env[0] != '\0') {
+			logPath = env;
+		} else if (char* p = SDL_GetPrefPath(NULL, "BattleShip")) {
 			logPath = std::string(p) + "ssb64.log";
 			SDL_free(p);
 		} else {
