@@ -1279,6 +1279,15 @@ int main(int argc, char* argv[]) {
 		std::string logPath;
 		if (const char* env = std::getenv("SSB64_LOG_PATH"); env != nullptr && env[0] != '\0') {
 			logPath = env;
+#if defined(BATTLESHIP_IOS)
+		} else if (const char* home = std::getenv("HOME"); home != nullptr) {
+			/* iOS: in Documents, so players can send it from the Files app
+			 * (On My iPhone > BattleShip). The previous session's log is
+			 * kept as ssb64-previous.log in case the game was reopened. */
+			const std::string docs = std::string(home) + "/Documents/";
+			logPath = docs + "ssb64.log";
+			std::rename(logPath.c_str(), (docs + "ssb64-previous.log").c_str());
+#endif
 		} else if (char* p = SDL_GetPrefPath(NULL, "BattleShip")) {
 			logPath = std::string(p) + "ssb64.log";
 			SDL_free(p);

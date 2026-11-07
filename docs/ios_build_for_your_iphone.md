@@ -32,7 +32,16 @@ The first run takes about an hour (tools, a Mac build, and the iPhone project se
 
 1. On the iPhone: Settings > General > **VPN & Device Management** > your Apple ID > **Trust** (first time only).
 2. Open **BattleShip**. When iOS asks to **find devices on local networks**, tap **Allow** (netplay needs it).
-3. To play online, tap the **invite link** a friend sent you (`battleship-net://join?...`). The game saves the room and joins it on the next start; if it was already open, swipe it away and open it again.
+3. To play online, tap the **invite link** a friend sent you. The game saves the room; if it was already open, swipe it away and open it again. It shows "Joining an online match" and waits for the host, who sets up each match (fighters, CPUs, teams, stage) on their phone. After the results it waits for the host's next match.
+
+## Hosting a match
+
+1. Open your **host link** (the invite link ending in `&h=1`) on your own iPhone once, then reopen BattleShip. It starts in the VS menu.
+2. Set up the match as usual. **Player 2 is your online opponent:** set it to **CPU** (any level) and pick their fighter; it becomes human when they join. Add CPUs as players 3 and 4, turn on teams, choose rules and items as you like.
+3. Pick the stage. Instead of starting, the room opens ("Room ABCD is open"). The match starts as soon as your friend joins. If nobody joins within 5 minutes, you play it offline against the CPU.
+4. After each match you're back at character select for the next one.
+
+To play offline again, delete `netplay.cfg` in Files > On My iPhone > BattleShip.
 
 ## Good to know
 
@@ -58,4 +67,6 @@ The script stops with a message saying what to do. Common cases:
 | Can't connect to a friend's room | Tap Allow for local networks (or Settings > Privacy & Security > Local Network > BattleShip); check the invite link; make sure your friend's server and game are running |
 | "Desync" or the match freezes online | Both players need the same version: both `git pull --recurse-submodules` and rebuild |
 
-If you're stuck, send the last 30 lines the script printed (the full iPhone build log is `build-ios/xcodebuild.log`). After a fix, `git pull --recurse-submodules` and run the script again; it continues where it stopped.
+If you're stuck, send the last 30 lines the script printed (the full iPhone build log is `build-ios/xcodebuild.log`).
+
+**If something goes wrong while playing**, send the game's log: Files > On My iPhone > BattleShip > `ssb64.log` (share it). If you've already reopened the game since, send `ssb64-previous.log` instead. After a fix, `git pull --recurse-submodules` and run the script again; it continues where it stopped.

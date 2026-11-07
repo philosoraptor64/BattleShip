@@ -18,6 +18,7 @@ void port_log_init(const char *path);
 
 /* Close the log file. Call at shutdown. */
 void port_log_close(void);
+void port_log_flush(void);
 
 /* Return the raw file descriptor of the log file, or -1 if not open.
  * Used by async-signal-safe crash handlers that cannot call fprintf. */

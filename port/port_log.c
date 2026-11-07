@@ -51,6 +51,13 @@ void port_log(const char *fmt, ...)
 	 * have their own flush path. */
 }
 
+/* Called about once a second from the frame loop: logs survive a crash or
+ * the app being swiped away, without paying for a flush per line. */
+void port_log_flush(void)
+{
+	if (sLogFile != NULL) fflush(sLogFile);
+}
+
 void port_exit_process(int code)
 {
 	if (sLogFile != NULL) fflush(sLogFile);

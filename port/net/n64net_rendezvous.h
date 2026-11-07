@@ -41,6 +41,11 @@ typedef struct N64NetRendezvousResult {
  * `sock` must be a bound, non-blocking IPv4 UDP socket. */
 int n64net_rendezvous_connect(int sock, const N64NetRendezvousConfig *config, N64NetRendezvousResult *out);
 
+/* Host leaving a room (e.g. after a match): tells the server to close it, so
+ * a joiner waiting for the next match pairs with the host's next room rather
+ * than this one. Fire-and-forget (sent a few times). */
+void n64net_rendezvous_bye(int sock, const N64NetRendezvousConfig *config);
+
 #ifdef __cplusplus
 }
 #endif

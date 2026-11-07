@@ -5,9 +5,14 @@
 #import <UIKit/UIKit.h>
 
 static UIWindow* sStatusWindow = nil;
+static UILabel* sStatusTitle = nil;
+static UILabel* sStatusBody = nil;
 
 extern "C" void port_ios_status_show(const char* title, const char* text) {
     if (sStatusWindow != nil) {
+        // Already showing: just update the text.
+        sStatusTitle.text = [NSString stringWithUTF8String:title];
+        sStatusBody.text = [NSString stringWithUTF8String:text];
         return;
     }
     UIWindowScene* scene = nil;
@@ -52,8 +57,11 @@ extern "C" void port_ios_status_show(const char* title, const char* text) {
         [stack.widthAnchor constraintLessThanOrEqualToAnchor:vc.view.widthAnchor multiplier:0.8],
     ]];
 
+    sStatusTitle = titleLabel;
+    sStatusBody = body;
     sStatusWindow = [[UIWindow alloc] initWithWindowScene:scene];
     sStatusWindow.rootViewController = vc;
+    sStatusWindow.windowLevel = UIWindowLevelNormal + 1;  // above the game's window, if it exists
     [sStatusWindow makeKeyAndVisible];
 }
 
@@ -61,6 +69,16 @@ extern "C" void port_ios_status_hide(void) {
     if (sStatusWindow == nil) {
         return;
     }
+    UIWindowScene* scene = sStatusWindow.windowScene;
     sStatusWindow.hidden = YES;
     sStatusWindow = nil;
+    sStatusTitle = nil;
+    sStatusBody = nil;
+    // Give keyboard/controller focus back to the game's window.
+    for (UIWindow* w in scene.windows) {
+        if (!w.hidden) {
+            [w makeKeyWindow];
+            break;
+        }
+    }
 }

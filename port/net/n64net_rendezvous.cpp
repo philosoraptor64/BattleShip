@@ -382,6 +382,27 @@ int Session::Run(N64NetRendezvousResult *out) {
 
 } // namespace
 
+extern "C" void n64net_rendezvous_bye(int sock, const N64NetRendezvousConfig *config) {
+    sockaddr_in server{};
+    if (sock < 0 || config == nullptr || config->server == nullptr || config->room == nullptr ||
+        !Resolve(config->server, &server)) {
+        return;
+    }
+    std::string room;
+    for (const char *c = config->room; *c && room.size() < 4; c++) {
+        room += (char)toupper((unsigned char)*c);
+    }
+    std::string msg = "BYE " + room;
+    if (config->password != nullptr && config->password[0] != '\0') {
+        msg += " " + std::to_string((long long)std::time(nullptr));
+        msg += " " + n64net::HmacSha256Hex(config->password, msg).substr(0, 32);
+    }
+    const std::string pkt = kPrefix + msg;
+    for (int i = 0; i < 3; i++) {
+        sendto(sock, pkt.data(), pkt.size(), 0, (const sockaddr *)&server, sizeof(server));
+    }
+}
+
 extern "C" int n64net_rendezvous_connect(int sock, const N64NetRendezvousConfig *config,
                                          N64NetRendezvousResult *out) {
     if (sock < 0 || config == nullptr || out == nullptr) {
@@ -396,6 +417,9 @@ extern "C" int n64net_rendezvous_connect(int sock, const N64NetRendezvousConfig 
 
 extern "C" int n64net_rendezvous_connect(int, const N64NetRendezvousConfig *, N64NetRendezvousResult *) {
     return -1;
+}
+
+extern "C" void n64net_rendezvous_bye(int, const N64NetRendezvousConfig *) {
 }
 
 #endif

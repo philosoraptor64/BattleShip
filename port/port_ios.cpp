@@ -233,7 +233,9 @@ bool AllCharsIn(const std::string& v, const char* allowed) {
 
 } // namespace
 
-/* Invite link: battleship-net://join?s=<host:port>&r=<room>&p=<password>
+/* Invite link: battleship-net://join?s=<host:port>&r=<room>&p=<password>[&h=1]
+ * (h=1: this phone hosts the room; the host sets up each match in the VS
+ * menus and the room opens when the battle would start).
  * Writes Documents/netplay.cfg so the next start joins that room. Called
  * from port/port_ios_url.mm, before SDL_main when the link launched the app.
  * Returns a message for the player when the app was already running (the
@@ -247,6 +249,7 @@ extern "C" const char* port_ios_handle_open_url(const char* url, int app_running
         return app_running ? message.c_str() : nullptr;
     }
     std::string server, room, password;
+    bool host = false;
     std::string query = u.substr(prefix.size());
     size_t pos = 0;
     while (pos <= query.size()) {
@@ -258,6 +261,7 @@ extern "C" const char* port_ios_handle_open_url(const char* url, int app_running
             if (k == "s") server = v;
             else if (k == "r") room = v;
             else if (k == "p") password = v;
+            else if (k == "h") host = (v == "1");
         }
         if (amp == std::string::npos) break;
         pos = amp + 1;
@@ -282,18 +286,22 @@ extern "C" const char* port_ios_handle_open_url(const char* url, int app_running
     out << "# Written by an invite link. Delete this file (or its lines) to play offline.\n"
         << "SSB64_NETPLAY=1\n"
         << "SSB64_NETPLAY_BOOTSTRAP=1\n"
+        << "SSB64_NETPLAY_LOBBY=1\n"
+        << (host ? "SSB64_NETPLAY_HOST=1\n" : "")
         << "SSB64_NETPLAY_SERVER=" << server << "\n"
         << "SSB64_NETPLAY_ROOM=" << room << "\n";
     if (!password.empty()) {
         out << "SSB64_NETPLAY_PASSWORD=" << password << "\n";
     }
     out << "SSB64_NETPLAY_ROLLBACK=1\n"
-        << "SSB64_NETPLAY_DELAY=2\n"
-        << "SSB64_NETPLAY_WAIT_SECS=180\n";
+        << "SSB64_NETPLAY_DELAY=2\n";
     out.close();
     port_log("ios: invite saved for room %s via %s\n", room.c_str(), server.c_str());
-    message = "Invite saved for room " + room +
-              ". Close BattleShip (swipe it away in the app switcher) and open it again to join.";
+    message = host ? "This iPhone will host room " + room +
+                         ". Close BattleShip (swipe it away) and open it again, then set up a VS match: "
+                         "Player 2 (set to CPU) is your online opponent."
+                   : "Invite saved for room " + room +
+                         ". Close BattleShip (swipe it away in the app switcher) and open it again to join.";
     return app_running ? message.c_str() : nullptr;
 }
 

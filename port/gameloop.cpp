@@ -758,6 +758,12 @@ void PortPushFrame(void)
 	port_enhancement_stage_hazards_tick();
 	port_widescreen_tick();
 
+	/* Keep the log on disk (about once a second) so it survives crashes and
+	 * the app being swiped away. */
+	if ((sFrameCount % 60) == 0) {
+		port_log_flush();
+	}
+
 #if !defined(__ANDROID__)
 #if !defined(BATTLESHIP_UWP) && !defined(BATTLESHIP_IOS)
 	ssb64::enhancements::TickDiscordPresence(); // DRP
