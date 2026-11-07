@@ -75,8 +75,10 @@ constexpr const char* kAnalogRemapUpRecenterCVars[PORT_ENHANCEMENT_MAX_PLAYERS] 
 // reports 0 so the game sees the stick leave neutral (tap jump requires
 // |y| < 20 the tick before) -- one tick of latency, only for such flicks.
 //
-// Up can also drop part-way on release and then freeze (e.g. at 45%). A
-// value frozen for kRecenterStillTics below full tilt becomes the zero too.
+// Up can also drop part-way on release and then freeze (e.g. at 45%). So a
+// fast fall (a release) is assumed to reach neutral: its value becomes the
+// zero at once, and only a new rise reads as up again. A value frozen for
+// kRecenterStillTics below full tilt becomes the zero too.
 constexpr float kRecenterMaxFall  = 3.0f; // per tick, of 85
 constexpr float kRecenterMinSpan  = 3.0f;  // travel left above a zero near full tilt
 constexpr float kRecenterStill     = 0.3f;  // per tick, of 85: "frozen" report
@@ -126,8 +128,9 @@ float RecenterUp(int player_index, float up, float down) {
     }
     st.flicking = false;
     st.still    = (std::fabs(fall) < kRecenterStill) ? st.still + 1 : 0;
+    const bool released = fall >= kRecenterMaxFall;
     if (fall > 0.0f) {
-        st.falls = (fall < kRecenterMaxFall) ? st.falls + 1 : 0;
+        st.falls = released ? 0 : st.falls + 1;
         st.rises = 0;
     } else if (fall < 0.0f) {
         st.rises = (-fall < kRecenterMaxRise) ? st.rises + 1 : 0;
@@ -135,7 +138,7 @@ float RecenterUp(int player_index, float up, float down) {
     }
     st.last = up;
     const bool frozen = st.still >= kRecenterStillTics && up < kRecenterFullHold;
-    if (st.falls >= kRecenterFallTics || st.rises >= kRecenterRiseTics || frozen || up < st.rest) {
+    if (released || st.falls >= kRecenterFallTics || st.rises >= kRecenterRiseTics || frozen || up < st.rest) {
         st.rest = up;
     }
     st.out = std::max(0.0f, (up - st.rest) * 85.0f / std::max(85.0f - st.rest, kRecenterMinSpan));
