@@ -17,7 +17,8 @@ endif()
 # Android needs ASM for the aarch64 coroutine context-switch
 # (port/coroutine_aarch64.S). Enable it before any add_library/add_executable
 # call sees an .S source. ASM is preprocessed by clang on the way through.
-if (CMAKE_SYSTEM_NAME STREQUAL "Android")
+# iOS devices need it too: their libc stubs getcontext() out (returns -1).
+if (CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
     enable_language(ASM)
 endif()
 
@@ -948,6 +949,9 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     # port_ios_prepare() stages into Documents at first launch.
     set(SSB64_IOS_BUNDLE_ID "io.github.philosoraptor.battleship" CACHE STRING "iOS bundle identifier")
     set(SSB64_IOS_TEAM "" CACHE STRING "Apple development team ID for signing")
+    # getcontext() is a stub on iOS devices, so use the aarch64 asm
+    # coroutine backend (coroutine_android.cpp) instead of ucontext.
+    target_sources(${PROJECT_NAME} PRIVATE port/coroutine_aarch64.S)
     set_target_properties(${PROJECT_NAME} PROPERTIES
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/ios/Info.plist.in"

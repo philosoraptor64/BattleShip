@@ -14,8 +14,9 @@
  * time.
  */
 
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(BATTLESHIP_IOS)
 
+/* iOS uses this backend too: getcontext() is a stub on devices. */
 #if !defined(__aarch64__) && !defined(__arm__)
 #  error "Android coroutine backend supports arm64-v8a (coroutine_aarch64.S) "  \
          "and armeabi-v7a (coroutine_armv7.S) only. Add an x86/x86_64 swap "    \
@@ -220,4 +221,4 @@ int port_coroutine_in_coroutine(void) {
 
 } /* extern "C" */
 
-#endif /* __ANDROID__ */
+#endif /* __ANDROID__ || BATTLESHIP_IOS */

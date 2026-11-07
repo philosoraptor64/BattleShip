@@ -1,5 +1,5 @@
 // coroutine_aarch64.S — context-switch primitive for the aarch64 coroutine
-// backend (Android, and any other aarch64 platform that opts in).
+// backend (Android, iOS, and any other aarch64 platform that opts in).
 //
 // The AAPCS64 calling convention defines this set of callee-saved state
 // as the only registers a function must preserve across a call:
@@ -29,6 +29,13 @@
 
 #if defined(__aarch64__)
 
+// Mach-O (iOS) prefixes C symbols with an underscore.
+#if defined(__APPLE__)
+#define SYM(name) _##name
+#else
+#define SYM(name) name
+#endif
+
     .text
     .balign 4
 
@@ -40,11 +47,11 @@
 // pauses at the instruction after its caller's bl to this function;
 // when something later swaps back into "from", that instruction
 // re-executes the ret below.
-    .globl  port_coroutine_swap
+    .globl  SYM(port_coroutine_swap)
 #if defined(__ELF__)
     .type   port_coroutine_swap, %function
 #endif
-port_coroutine_swap:
+SYM(port_coroutine_swap):
     // Save "from" (x0)
     stp     x19, x20, [x0, #0]
     stp     x21, x22, [x0, #16]
@@ -87,17 +94,17 @@ port_coroutine_swap:
 // argument to the C trampoline, which invokes the user entry function
 // and performs a permanent yield. The brk traps if the C trampoline ever
 // returns, which would indicate a bug in the swap logic.
-    .globl  port_coroutine_trampoline_aarch64
+    .globl  SYM(port_coroutine_trampoline_aarch64)
 #if defined(__ELF__)
     .type   port_coroutine_trampoline_aarch64, %function
 #endif
-port_coroutine_trampoline_aarch64:
+SYM(port_coroutine_trampoline_aarch64):
     // Establish a clean frame so any debugger walking via x29 stops cleanly
     // at the trampoline rather than walking into uninitialized stack.
     mov     x29, #0
     mov     x30, #0
     mov     x0, x19
-    bl      port_coroutine_trampoline_c
+    bl      SYM(port_coroutine_trampoline_c)
     brk     #0
 #if defined(__ELF__)
     .size   port_coroutine_trampoline_aarch64, .-port_coroutine_trampoline_aarch64
