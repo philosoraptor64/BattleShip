@@ -120,6 +120,11 @@ extern "C" void port_ios_prepare(void) {
     std::error_code ec;
     fs::create_directories(docs, ec);
 
+    // SDL exposes the iPhone's accelerometer as a joystick by default, and
+    // libultraship merges it into player 1's stick: tilting the phone reads
+    // as holding the stick, which swallowed tap jumps.
+    SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
+
     CopyBundledGameData(docs);
     LoadNetplayConfig(docs);
 
