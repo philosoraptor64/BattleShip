@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Join a BattleShip room</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f4f4f6; --fg: #1b1b1f; --muted: #5b5b66; --accent: #d62f2f; --card: #ffffff; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #111114; --fg: #f1f1f4; --muted: #a3a3ad; --card: #1c1c21; } }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--fg);
+         font: 17px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 420px; margin: 16px; padding: 28px 24px; background: var(--card); border-radius: 18px; text-align: center; }
+  h1 { font-size: 24px; margin: 0 0 6px; }
+  .room { font-size: 40px; font-weight: 700; letter-spacing: 6px; margin: 14px 0; }
+  a.button { display: block; padding: 14px; border-radius: 12px; background: var(--accent); color: #fff; text-decoration: none; font-weight: 600; }
+  p { color: var(--muted); margin: 14px 0 0; font-size: 15px; }
+  .error { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Join a BattleShip room</h1>
+  <div class="room" id="room">&nbsp;</div>
+  <a class="button" id="open" href="#">Open in BattleShip</a>
+  <p id="help">If nothing happens, tap the button. You need BattleShip installed on this iPhone (see the build guide).</p>
+</main>
+<script>
+// The invite details live after "#", which browsers never send to the web
+// server: this page hands them straight to the app (battleship-net://join?...).
+(function () {
+  var details = location.hash.replace(/^#/, "");
+  var params = new URLSearchParams(details);
+  var room = (params.get("r") || "").toUpperCase();
+  var ok = /^[A-Z0-9]{4}$/.test(room) && /^[A-Za-z0-9.\-]+:[0-9]{1,5}$/.test(params.get("s") || "");
+  var open = document.getElementById("open");
+  if (!ok) {
+    document.getElementById("room").textContent = "?";
+    open.style.display = "none";
+    var help = document.getElementById("help");
+    help.className = "error";
+    help.textContent = "This invite link is incomplete. Ask for a new one.";
+    return;
+  }
+  document.getElementById("room").textContent = room;
+  var appUrl = "battleship-net://join?" + details;
+  open.href = appUrl;
+  history.replaceState(null, "", location.pathname);  // keep the password out of history
+  location.href = appUrl;
+})();
+</script>
+</body>
+</html>
