@@ -8,12 +8,14 @@
 # including uncommitted edits (so identical edits on two machines still match).
 # Docs, scripts and CI are left out on purpose.
 #
-# Computed at configure time; ios/build-and-install.sh reconfigures on every
-# run. Outside a git checkout it falls back to "nogit".
+# Runs as a build step on every build (a commit changes the fingerprint
+# without touching any file, so a configure-time value would go stale):
+#   cmake -DSRC=<source dir> -DOUT=<header> -P cmake/NetplayBuildId.cmake
+# The header is rewritten only when the value changes, so only the file that
+# includes it rebuilds. Outside a git checkout the value is "nogit".
 
-function(ssb64_compute_netplay_build_id out_var)
+function(ssb64_compute_netplay_build_id src out_var)
     find_package(Git QUIET)
-    set(src "${CMAKE_CURRENT_SOURCE_DIR}")
     if (NOT GIT_FOUND OR NOT EXISTS "${src}/.git")
         set(${out_var} "nogit" PARENT_SCOPE)
         return()
@@ -43,3 +45,16 @@ function(ssb64_compute_netplay_build_id out_var)
     string(SUBSTRING "${hash}" 0 12 short)
     set(${out_var} "${short}" PARENT_SCOPE)
 endfunction()
+
+if (CMAKE_SCRIPT_MODE_FILE AND DEFINED SRC AND DEFINED OUT)
+    ssb64_compute_netplay_build_id("${SRC}" id)
+    set(content "#pragma once\n#define SSB64_NETPLAY_BUILD_ID \"${id}\"\n")
+    set(old "")
+    if (EXISTS "${OUT}")
+        file(READ "${OUT}" old)
+    endif()
+    if (NOT old STREQUAL content)
+        file(WRITE "${OUT}" "${content}")
+        message(STATUS "Netplay build ID: ${id}")
+    endif()
+endif()

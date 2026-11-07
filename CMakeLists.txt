@@ -1031,13 +1031,18 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 )
 
 # Netplay build fingerprint: players can only pair with identical builds
-# (cmake/NetplayBuildId.cmake). Rewritten only when it changes, and included
-# by port/net/netplay_rendezvous.cpp alone, so a new ID rebuilds one file.
-include(NetplayBuildId)
-ssb64_compute_netplay_build_id(SSB64_NETPLAY_BUILD_ID)
-message(STATUS "Netplay build ID: ${SSB64_NETPLAY_BUILD_ID}")
-file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/generated/netplay_build_id.h"
-     CONTENT "#pragma once\n#define SSB64_NETPLAY_BUILD_ID \"@SSB64_NETPLAY_BUILD_ID@\"\n" @ONLY)
+# (cmake/NetplayBuildId.cmake). Recomputed on every build; the header changes
+# only when the value does, and only port/net/netplay_rendezvous.cpp includes
+# it, so a new ID rebuilds one file.
+set(SSB64_NETPLAY_BUILD_ID_H "${CMAKE_BINARY_DIR}/generated/netplay_build_id.h")
+set(_ssb64_build_id_cmd ${CMAKE_COMMAND} -DSRC=${CMAKE_CURRENT_SOURCE_DIR} -DOUT=${SSB64_NETPLAY_BUILD_ID_H}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/NetplayBuildId.cmake)
+execute_process(COMMAND ${_ssb64_build_id_cmd})  # so the header exists before the first build
+add_custom_target(ssb64_netplay_build_id
+    COMMAND ${_ssb64_build_id_cmd}
+    BYPRODUCTS ${SSB64_NETPLAY_BUILD_ID_H}
+    COMMENT "Netplay build fingerprint")
+add_dependencies(${PROJECT_NAME} ssb64_netplay_build_id)
 target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_BINARY_DIR}/generated")
 
 if (NOT CMAKE_SYSTEM_NAME STREQUAL "Android" AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT BATTLESHIP_UWP)
