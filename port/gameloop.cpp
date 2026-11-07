@@ -718,7 +718,8 @@ void PortPushFrame(void)
 	 * intros and the desk-to-stage transition would never appear. Run
 	 * this BEFORE posting INTR_VRETRACE so old gfx completions are
 	 * delivered before the next game tick can tear down scene memory. */
-	const int rollbackSyncTest = port_rollback_synctest_begin();
+	const int rollbackFrame = port_rollback_frame_begin(PortResimulateFrame);
+	const int rollbackSyncTest = rollbackFrame ? 0 : port_rollback_synctest_begin();
 	port_vi_simulate_vblank();
 
 	/* Post a VI retrace event to the scheduler's message queue. See
@@ -742,6 +743,9 @@ void PortPushFrame(void)
 	port_resume_service_threads();
 	if (rollbackSyncTest) {
 		port_rollback_synctest_end(PortResimulateFrame);
+	}
+	if (rollbackFrame) {
+		port_rollback_frame_end();
 	}
 
 	port_enhancement_stage_hazards_tick();

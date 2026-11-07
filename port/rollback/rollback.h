@@ -15,6 +15,12 @@ extern int gPortRollbackResim;
 int port_rollback_synctest_begin(void);
 void port_rollback_synctest_end(void (*resimulate_frame)(void));
 
+/* SSB64_NETPLAY_ROLLBACK=1: call begin before running a battle frame (it
+ * performs any pending rollback with the callback, then snapshots) and end
+ * after it. begin returns 0 when rollback is not active. */
+int port_rollback_frame_begin(void (*resimulate_frame)(void));
+void port_rollback_frame_end(void);
+
 #ifdef __cplusplus
 }
 #endif

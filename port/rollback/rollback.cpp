@@ -50,6 +50,9 @@ void syNetSyncHashTick(uint32_t *out_columns);
 unsigned int syNetInputGetTick(void);
 int syNetPeerCheckLocalPlayer(int player);
 int port_rollback_game_in_battle(void);
+int syNetPeerCheckRollbackEnabled(void);
+void syNetPeerRecordTickHash(void);
+int syNetInputTakeRollbackTick(unsigned int *out_tick);
 }
 
 namespace {
@@ -261,5 +264,110 @@ extern "C" void port_rollback_synctest_end(void (*resimulate_frame)(void)) {
                  sRestoreUsecs / sSyncTestFrames, sSyncTestDepth, sResimUsecs / sSyncTestFrames,
                  (snap.data.size() + snap.bss.size() + snap.arena.size() + snap.stacks.size()) / 1024,
                  snap.arena.size() / 1024, snap.stacks.size() / 1024);
+    }
+}
+
+/* ------------------------------------------------------------------------
+ * Netplay rollback (SSB64_NETPLAY_ROLLBACK=1).
+ *
+ * Every battle frame starts by snapshotting the state before its tick into
+ * a ring keyed by tick. When netinput reports that a remote input arrived
+ * for an already-simulated tick and differs from the prediction it ran with,
+ * the next frame restores the snapshot from before that tick and
+ * resimulates up to the present with the corrected input, re-taking the
+ * snapshots on the way; then the frame runs normally. */
+namespace {
+GameSnapshot sRbRing[kRing];
+uint32_t sRbRingTick[kRing];
+bool sRbRingCleared;
+bool sRbArmed;
+uint32_t sRbRollbacks, sRbResimFrames, sRbMaxDepth, sRbTooDeep, sRbFrames;
+double sRbUsecs;
+
+void RbClearRing() {
+    for (uint32_t &t : sRbRingTick) {
+        t = UINT32_MAX;
+    }
+    sRbRingCleared = true;
+}
+} // namespace
+
+extern "C" int port_rollback_frame_begin(void (*resimulate_frame)(void)) {
+    sRbArmed = false;
+    if (!syNetPeerCheckRollbackEnabled() || !FindSections()) {
+        return 0;
+    }
+    const uint32_t tick = syNetInputGetTick();
+    if (tick < 1 || !port_rollback_game_in_battle()) {
+        if (!sRbRingCleared) {
+            RbClearRing();
+        }
+        return 0;
+    }
+    static bool journaling;
+    if (!journaling) {
+        journaling = true;
+        portRelocJournalSetEnabled(1);
+        RbClearRing();
+        port_log("SSB64 Rollback: netplay rollback enabled (ring %d)\n", kRing);
+    }
+    sRbRingCleared = false;
+
+    unsigned int from;
+    if (syNetInputTakeRollbackTick(&from) && from < tick) {
+        const uint32_t depth = tick - from;
+        if (sRbRingTick[from % kRing] != from) {
+            // Older than the ring: the window (SSB64_NETPLAY_ROLLBACK_WINDOW)
+            // should make this impossible. The peers have now diverged.
+            sRbTooDeep++;
+            port_log("SSB64 Rollback: cannot roll back %u ticks (from %u at %u): no snapshot\n", depth, from, tick);
+        } else {
+            auto t = std::chrono::steady_clock::now();
+            Restore(sRbRing[from % kRing]);
+            gPortRollbackResim = 1;
+            for (uint32_t n = 0; n < kRing && syNetInputGetTick() < tick && port_rollback_game_in_battle(); n++) {
+                const uint32_t cur = syNetInputGetTick();
+                if (cur != from) {
+                    Save(sRbRing[cur % kRing]);
+                    sRbRingTick[cur % kRing] = cur;
+                }
+                resimulate_frame();
+                syNetPeerRecordTickHash();
+                sRbResimFrames++;
+            }
+            gPortRollbackResim = 0;
+            sRbUsecs += UsecsSince(t);
+            sRbRollbacks++;
+            sRbMaxDepth = std::max(sRbMaxDepth, depth);
+            if (syNetInputGetTick() != tick) {
+                port_log("SSB64 Rollback: resimulation ended at tick %u, expected %u\n", syNetInputGetTick(), tick);
+            }
+        }
+    }
+    Save(sRbRing[tick % kRing]);
+    sRbRingTick[tick % kRing] = tick;
+
+    const uint32_t oldest = (tick >= kRing - 1) ? tick - (kRing - 1) : 0;
+    if (sRbRingTick[oldest % kRing] == oldest) {
+        portRelocJournalForgetBefore(sRbRing[oldest % kRing].relocMark);
+    }
+    sRbArmed = true;
+    return 1;
+}
+
+extern "C" void port_rollback_frame_end(void) {
+    if (!sRbArmed) {
+        return;
+    }
+    sRbArmed = false;
+    if (port_rollback_game_in_battle()) {
+        syNetPeerRecordTickHash();
+    }
+    if (++sRbFrames % 600 == 0) {
+        port_log("SSB64 Rollback: frames=%u rollbacks=%u resimulated=%u (avg depth %.1f, max %u) too_deep=%u "
+                 "avg rollback=%.0fus\n",
+                 sRbFrames, sRbRollbacks, sRbResimFrames,
+                 sRbRollbacks ? (double)sRbResimFrames / sRbRollbacks : 0.0, sRbMaxDepth, sRbTooDeep,
+                 sRbRollbacks ? sRbUsecs / sRbRollbacks : 0.0);
     }
 }
