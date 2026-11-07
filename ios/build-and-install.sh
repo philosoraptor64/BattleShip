@@ -22,12 +22,42 @@ die() { printf '\n\033[31mStopped: %s\033[0m\n' "$*" >&2; exit 1; }
 step "Checking the Mac"
 xcode-select -p 2>/dev/null | grep -q "Xcode.app" ||
 	die "Install Xcode from the App Store, open it once, then run: sudo xcode-select -s /Applications/Xcode.app"
+xcodebuild -version >/dev/null 2>&1 ||
+	die "Xcode is not ready. Run: sudo xcodebuild -license accept && sudo xcodebuild -runFirstLaunch"
 xcodebuild -version | head -1
+xcodebuild -showsdks 2>/dev/null | grep -q -- "-sdk iphoneos" ||
+	die "Xcode has no iOS platform yet. Run: xcodebuild -downloadPlatform iOS  (or Xcode > Settings > Components)"
 command -v brew >/dev/null || die "Install Homebrew first: https://brew.sh"
+free_gb=$(df -g . | awk 'NR==2 {print $4}')
+[ "${free_gb:-0}" -ge 10 ] || die "Only ${free_gb} GB free on this disk; the builds need about 10 GB."
+
+# The ROM: baserom.us.z64, or a .n64/.v64 dump that gets converted to .z64.
+want=e2929e10fccc0aa84e5776227e798abc07cedabf
+if [ ! -f baserom.us.z64 ]; then
+	for f in baserom.us.n64 baserom.us.v64; do [ -f "$f" ] && cp "$f" baserom.us.z64 && break; done
+fi
 [ -f baserom.us.z64 ] || die "Put your ROM in $ROOT as baserom.us.z64"
+if [ "$(shasum baserom.us.z64 | cut -c1-40)" != "$want" ]; then
+	# Big-endian .z64 starts 80 37 12 40; .v64 swaps byte pairs, .n64 reverses each 4 bytes.
+	python3 - baserom.us.z64 <<'PY'
+import sys
+path = sys.argv[1]
+data = bytearray(open(path, "rb").read())
+head = bytes(data[:4])
+if head == b"\x37\x80\x40\x12":      # .v64
+    data[0::2], data[1::2] = data[1::2], data[0::2]
+elif head == b"\x40\x12\x37\x80":    # .n64
+    for i in range(0, len(data) - 3, 4):
+        data[i:i + 4] = data[i:i + 4][::-1]
+else:
+    sys.exit(0)
+open(path, "wb").write(data)
+print("Converted the ROM to .z64 byte order.")
+PY
+fi
 sha=$(shasum baserom.us.z64 | cut -c1-40)
-[ "$sha" = e2929e10fccc0aa84e5776227e798abc07cedabf ] ||
-	die "baserom.us.z64 is not Super Smash Bros. (USA) v1.0 (SHA-1 $sha). Byte-swapped .n64/.v64 dumps must be converted to .z64."
+[ "$sha" = "$want" ] ||
+	die "baserom.us.z64 is not Super Smash Bros. (USA) v1.0 (SHA-1 $sha). Other versions (Japan, Europe, Rev A) are not supported."
 git submodule update --init --recursive
 
 step "Installing build tools (Homebrew)"
