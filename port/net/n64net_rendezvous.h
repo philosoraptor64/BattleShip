@@ -17,6 +17,7 @@ typedef struct N64NetRendezvousConfig {
     const char *server;      /* "host:port"; host may be a DNS name */
     const char *game;        /* game + protocol id; only equal ids pair up */
     const char *room;        /* 4-char code; NULL/"" lets the host get a random one */
+    const char *password;    /* server password, or NULL/"" for an open server */
     int is_host;             /* 1 = create the room, 0 = join it */
     int force_relay;         /* skip hole punching (testing) */
     int wait_secs;           /* how long to wait for the other player (default 600) */

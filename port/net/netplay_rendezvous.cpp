@@ -4,6 +4,7 @@
  *   SSB64_NETPLAY_SERVER=host:port   rendezvous server (enables room codes)
  *   SSB64_NETPLAY_ROOM=ABCD          room code; the host may leave it unset
  *                                    to get a random one (shown in the log)
+ *   SSB64_NETPLAY_PASSWORD=...       server password, if the server has one
  *   SSB64_NETPLAY_HOST=1             create the room (P1); otherwise join (P2)
  *   SSB64_NETPLAY_RELAY=1            skip hole punching, always relay (testing)
  *   SSB64_NETPLAY_WAIT_SECS=600      how long to wait for the other player
@@ -31,6 +32,7 @@ extern "C" int port_netplay_rendezvous(int sock, int is_host, struct sockaddr_in
     cfg.server = std::getenv("SSB64_NETPLAY_SERVER");
     cfg.game = kGameId;
     cfg.room = std::getenv("SSB64_NETPLAY_ROOM");
+    cfg.password = std::getenv("SSB64_NETPLAY_PASSWORD");
     cfg.is_host = is_host;
     cfg.force_relay = EnvInt("SSB64_NETPLAY_RELAY", 0);
     cfg.wait_secs = EnvInt("SSB64_NETPLAY_WAIT_SECS", 600);

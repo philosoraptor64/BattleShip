@@ -1,5 +1,6 @@
 /* n64net rendezvous client. See n64net_rendezvous.h. */
 #include "n64net_rendezvous.h"
+#include "n64net_hmac.h"
 
 #if !defined(_WIN32)
 
@@ -10,6 +11,7 @@
 #include <unistd.h>
 
 #include <chrono>
+#include <ctime>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -91,6 +93,9 @@ class Session {
     Session(int sock, const N64NetRendezvousConfig &cfg) : mSock(sock), mCfg(cfg) {
         mLog = cfg.log ? cfg.log : NoLog;
         mIsHost = cfg.is_host != 0;
+        if (cfg.password != nullptr) {
+            mPassword = cfg.password;
+        }
         if (cfg.room != nullptr) {
             for (const char *c = cfg.room; *c && mRoom.size() < 4; c++) {
                 mRoom += (char)toupper((unsigned char)*c);
@@ -105,11 +110,21 @@ class Session {
         std::string pkt = kPrefix + msg;
         sendto(mSock, pkt.data(), pkt.size(), 0, (const sockaddr *)&to, sizeof(to));
     }
+    // Server commands carry "<unix_time> <mac>" when a password is set; the
+    // password itself is never sent (see rendezvous.py).
+    void SendToServer(const std::string &msg) {
+        if (mPassword.empty()) {
+            Send(mServer, msg);
+            return;
+        }
+        std::string signed_msg = msg + " " + std::to_string((long long)std::time(nullptr));
+        Send(mServer, signed_msg + " " + n64net::HmacSha256Hex(mPassword, signed_msg).substr(0, 32));
+    }
     void Register() {
         if (mIsHost) {
-            Send(mServer, "HOST " + std::string(mCfg.game) + " " + (mRoom.empty() ? "-" : mRoom) + " " + mLan);
+            SendToServer("HOST " + std::string(mCfg.game) + " " + (mRoom.empty() ? "-" : mRoom) + " " + mLan);
         } else {
-            Send(mServer, "JOIN " + std::string(mCfg.game) + " " + mRoom + " " + mLan);
+            SendToServer("JOIN " + std::string(mCfg.game) + " " + mRoom + " " + mLan);
         }
     }
     // Waits up to `ms` for one datagram. Returns its size, 0 if none, -1 on error.
@@ -160,6 +175,7 @@ class Session {
     void (*mLog)(const char *, ...);
     bool mIsHost;
     std::string mRoom;
+    std::string mPassword;
     sockaddr_in mServer{};
     std::string mLan;
     std::vector<sockaddr_in> mCandidates;
@@ -213,7 +229,11 @@ bool Session::WaitForPeer() {
                 }
                 continue;
             }
-            mLog("n64net: server refused: %s\n", f[1].c_str());
+            if (f[1] == "auth") {
+                mLog("n64net: server refused the password (check SSB64_NETPLAY_PASSWORD and the clock)\n");
+            } else {
+                mLog("n64net: server refused: %s\n", f[1].c_str());
+            }
             return false;
         }
     }
@@ -288,7 +308,7 @@ bool Session::RequestRelay() {
 
     while (NowMs() - start < kRelayTimeoutMs) {
         if (NowMs() >= next_request) {
-            Send(mServer, "RELAY " + mRoom);
+            SendToServer("RELAY " + mRoom);
             next_request = NowMs() + kRelayRequestIntervalMs;
         }
         sockaddr_in from{};
