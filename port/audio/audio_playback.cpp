@@ -12,6 +12,7 @@
 // to prove the audio output path works end-to-end. The audio coroutine calls
 // portAudioPushSilence() once per tick.
 
+#include "rollback/rollback.h"
 #include "audio_playback.h"
 #include "port_log.h"
 
@@ -205,6 +206,10 @@ static const int16_t* applyOutputFilter(const int16_t* input, int sampleCount)
 
 extern "C" void portAudioSubmitFrame(const void *buf, int sampleCount)
 {
+    // Rollback resimulation re-runs frames whose audio already played.
+    if (gPortRollbackResim) {
+        return;
+    }
     if (buf == nullptr || sampleCount <= 0) {
         portAudioPushSilence();
         return;

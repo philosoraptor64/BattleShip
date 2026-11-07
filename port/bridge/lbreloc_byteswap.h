@@ -306,4 +306,12 @@ void portMarkSyntheticSprite(void *sprite, void *bitmaps, unsigned int nbitmaps,
 }
 #endif
 
+#ifdef __cplusplus
+#include <memory>
+/* Rollback: capture/restore the in-place fixup trackers with a snapshot. */
+struct PortFixupState;
+std::shared_ptr<const PortFixupState> portFixupStateCapture(void);
+void portFixupStateRestore(const std::shared_ptr<const PortFixupState> &state);
+#endif
+
 #endif /* LBRELOC_BYTESWAP_H */

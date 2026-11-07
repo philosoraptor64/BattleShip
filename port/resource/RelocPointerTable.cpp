@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
 #include <vector>
 #include <spdlog/spdlog.h>
 
@@ -56,6 +57,31 @@ static uint32_t  sCapacity    = 0;
  * tokens don't collide with brand-new ones in test scenarios. Vector is
  * a small overhead per slot but the simplicity is worth it. */
 static std::vector<uint32_t> sFreeIndices;
+
+/* Rollback undo journal. While enabled, every slot change is recorded with
+ * the slot's previous value, so portRelocJournalUndoTo() can put the table
+ * back exactly as it was at a snapshot: a resimulated file load then mints
+ * the same tokens it did the first time. Marks are absolute positions;
+ * sJournalBase is the position of sJournal[0]. */
+enum JournalKind : uint8_t { JOURNAL_REGISTER_NEW, JOURNAL_REGISTER_REUSED, JOURNAL_INVALIDATE };
+
+struct JournalEntry {
+    Slot old;
+    uint32_t index;
+    uint32_t oldNextIndex;
+    JournalKind kind;
+};
+
+static bool sJournalEnabled = false;
+static std::vector<JournalEntry> sJournal;
+static size_t sJournalBase = 0;
+
+static void journal(JournalKind kind, uint32_t index, uint32_t oldNextIndex)
+{
+    if (sJournalEnabled) {
+        sJournal.push_back({ sSlots[index], index, oldNextIndex, kind });
+    }
+}
 
 static void ensureCapacity(void)
 {
@@ -149,6 +175,7 @@ uint32_t portRelocRegisterPointer(void *ptr)
          * been bumped on invalidation; we just set the ptr. */
         index = sFreeIndices.back();
         sFreeIndices.pop_back();
+        journal(JOURNAL_REGISTER_REUSED, index, sNextIndex);
         if (sSlots[index].gen == 0) {
             /* Shouldn't happen — invalidation bumps gen — but recover. */
             sSlots[index].gen = 1;
@@ -157,6 +184,7 @@ uint32_t portRelocRegisterPointer(void *ptr)
     } else {
         index = sNextIndex++;
         ensureCapacity();
+        journal(JOURNAL_REGISTER_NEW, index, index);
         gen = bumpSlotGeneration(sSlots[index].gen);
         sSlots[index].gen = gen;
     }
@@ -230,6 +258,7 @@ void portRelocInvalidateRange(const void *base, size_t size)
         if (sSlots[i].gen == 0) continue;       /* already free */
         uintptr_t p = reinterpret_cast<uintptr_t>(sSlots[i].ptr);
         if (p >= lo && p < hi) {
+            journal(JOURNAL_INVALIDATE, i, sNextIndex);
             sSlots[i].ptr = nullptr;
             sSlots[i].gen = bumpSlotGeneration(sSlots[i].gen);
             sFreeIndices.push_back(i);
@@ -254,11 +283,58 @@ void portRelocInvalidateRange(const void *base, size_t size)
  */
 void portRelocResetPointerTable(void)
 {
+    if (sJournalEnabled && !sJournal.empty()) {
+        spdlog::error("RelocPointerTable: hard reset while rollback journaling; earlier snapshots are invalid");
+        sJournalBase += sJournal.size();
+        sJournal.clear();
+    }
     if (sSlots != nullptr) {
         memset(sSlots, 0, sCapacity * sizeof(Slot));
     }
     sNextIndex = 1;
     sFreeIndices.clear();
+}
+
+void portRelocJournalSetEnabled(int enabled)
+{
+    sJournalEnabled = (enabled != 0);
+    sJournalBase += sJournal.size();
+    sJournal.clear();
+}
+
+size_t portRelocJournalMark(void)
+{
+    return sJournalBase + sJournal.size();
+}
+
+void portRelocJournalUndoTo(size_t mark)
+{
+    while (sJournalBase + sJournal.size() > mark && !sJournal.empty()) {
+        const JournalEntry e = sJournal.back();
+        sJournal.pop_back();
+        sSlots[e.index] = e.old;
+        switch (e.kind) {
+            case JOURNAL_REGISTER_NEW:
+                sNextIndex = e.oldNextIndex;
+                break;
+            case JOURNAL_REGISTER_REUSED:
+                sFreeIndices.push_back(e.index);
+                break;
+            case JOURNAL_INVALIDATE:
+                sFreeIndices.pop_back();
+                break;
+        }
+    }
+}
+
+void portRelocJournalForgetBefore(size_t mark)
+{
+    if (mark <= sJournalBase) {
+        return;
+    }
+    const size_t drop = std::min(mark - sJournalBase, sJournal.size());
+    sJournal.erase(sJournal.begin(), sJournal.begin() + drop);
+    sJournalBase += drop;
 }
 
 } /* extern "C" */

@@ -5,7 +5,8 @@
  * swapcontext() provides the resume/yield mechanism.
  */
 
-#if !defined(_WIN32) && !defined(__ANDROID__) && !defined(BATTLESHIP_IOS)
+#if !defined(_WIN32) && !defined(__ANDROID__) && !defined(BATTLESHIP_IOS) && \
+    !(defined(__APPLE__) && defined(__aarch64__))
 
 /*
  * macOS marks the ucontext / swapcontext routines as deprecated and hides

@@ -17,8 +17,9 @@ endif()
 # Android needs ASM for the aarch64 coroutine context-switch
 # (port/coroutine_aarch64.S). Enable it before any add_library/add_executable
 # call sees an .S source. ASM is preprocessed by clang on the way through.
-# iOS devices need it too: their libc stubs getcontext() out (returns -1).
-if (CMAKE_SYSTEM_NAME STREQUAL "Android" OR CMAKE_SYSTEM_NAME STREQUAL "iOS")
+# iOS devices need it too (their libc stubs getcontext() out), and Apple
+# Silicon Macs use it so rollback snapshots share one coroutine backend.
+if (CMAKE_SYSTEM_NAME STREQUAL "Android" OR APPLE)
     enable_language(ASM)
 endif()
 
@@ -828,6 +829,26 @@ target_include_directories(ssb64_game PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/libultraship/include
 )
 
+# Rollback snapshots: place the game's mutable globals in dedicated sections
+# (port/rollback/snapshot_section.h). -fno-common turns tentative definitions
+# into real ones so the section pragma applies to them. Files whose state
+# must survive a rollback, or that only hold render output, opt out.
+if (APPLE AND CMAKE_C_COMPILER_ID MATCHES "Clang")
+    target_compile_options(ssb64_game PRIVATE
+        $<$<COMPILE_LANGUAGE:C>:-fno-common>
+        $<$<COMPILE_LANGUAGE:C>:-include>
+        "$<$<COMPILE_LANGUAGE:C>:${CMAKE_CURRENT_SOURCE_DIR}/port/rollback/snapshot_section.h>"
+    )
+    set_source_files_properties(
+        decomp/src/sys/netpeer.c
+        decomp/src/sys/netreplay.c
+        decomp/src/sys/framebuffer.c
+        decomp/src/sys/zbuffer.c
+        TARGET_DIRECTORY ssb64_game
+        PROPERTIES COMPILE_DEFINITIONS SSB64_SNAPSHOT_EXCLUDE=1
+    )
+endif()
+
 # Clang 16+ promoted several historically-warning diagnostics to errors by
 # default, which breaks the decomp C code on macOS/Linux. The decomp was
 # written against IDO 7.1 and relies on implicit function declarations, loose
@@ -949,9 +970,6 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
     # port_ios_prepare() stages into Documents at first launch.
     set(SSB64_IOS_BUNDLE_ID "io.github.philosoraptor.battleship" CACHE STRING "iOS bundle identifier")
     set(SSB64_IOS_TEAM "" CACHE STRING "Apple development team ID for signing")
-    # getcontext() is a stub on iOS devices, so use the aarch64 asm
-    # coroutine backend (coroutine_android.cpp) instead of ucontext.
-    target_sources(${PROJECT_NAME} PRIVATE port/coroutine_aarch64.S)
     set_target_properties(${PROJECT_NAME} PROPERTIES
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/ios/Info.plist.in"
@@ -964,6 +982,13 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
         XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${SSB64_IOS_TEAM}"
         XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Apple Development"
     )
+endif()
+
+if (APPLE)
+    # aarch64 asm coroutine backend (coroutine_android.cpp): iOS devices stub
+    # getcontext(), and its pooled stacks are what rollback snapshots copy.
+    # The .S body is #if __aarch64__, so x86_64 slices keep ucontext.
+    target_sources(${PROJECT_NAME} PRIVATE port/coroutine_aarch64.S)
 endif()
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows")

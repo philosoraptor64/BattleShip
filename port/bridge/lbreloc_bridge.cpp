@@ -10,6 +10,7 @@
  * functions matching the signatures in src/lb/lbreloc.h.
  */
 
+#include "rollback/snapshot_section.h"
 #include <ship/Context.h>
 #include <ship/resource/ResourceManager.h>
 #include <spdlog/spdlog.h>
@@ -116,12 +117,15 @@ void* lbRelocGetForceExternBufferFile(u32 id);
 //                               //
 // // // // // // // // // // // //
 
-static LBInternBuffer sLBRelocInternBuffer;
+/* Which files are loaded where is simulation state: a rollback that rewinds
+ * the heap must also forget files loaded since, or they read as loaded but
+ * zeroed. So these live in the snapshot section. */
+SSB64_SNAPSHOT_INSIDE static LBInternBuffer sLBRelocInternBuffer;
 
-static u32 *sLBRelocExternFileIDs;
-static s32 sLBRelocExternFileIDsNum;
-static s32 sLBRelocExternFileIDsMax;
-static void *sLBRelocExternFileHeap;
+SSB64_SNAPSHOT_INSIDE static u32 *sLBRelocExternFileIDs;
+SSB64_SNAPSHOT_INSIDE static s32 sLBRelocExternFileIDsNum;
+SSB64_SNAPSHOT_INSIDE static s32 sLBRelocExternFileIDsMax;
+SSB64_SNAPSHOT_INSIDE static void *sLBRelocExternFileHeap;
 
 struct PortRelocFileRange
 {

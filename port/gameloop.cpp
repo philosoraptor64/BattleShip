@@ -53,6 +53,7 @@ extern "C" bool port_drain_pending_menu_toggle(void);
 #endif
 
 #include "port_log.h"
+#include "rollback/rollback.h"
 #include "renderdoc_trigger.h"
 
 /* Backbuffer screenshot capture — implemented in libultraship's DX11 backend.
@@ -680,6 +681,16 @@ static void port_screenshot_maybe_capture(int frame)
 	}
 }
 
+/* One game frame for rollback resimulation: the same vblank + VRETRACE +
+ * service-thread rounds as PortPushFrame, without event pumping, mod events
+ * or presenting. Only the last resimulated frame's display list is drawn. */
+static void PortResimulateFrame(void)
+{
+	port_vi_simulate_vblank();
+	osSendMesg(&gSYSchedulerTaskMesgQueue, port_make_os_mesg_int(INTR_VRETRACE), OS_MESG_NOBLOCK);
+	port_resume_service_threads();
+}
+
 void PortPushFrame(void)
 {
 	// Process cheats safely before the frame updates
@@ -707,6 +718,7 @@ void PortPushFrame(void)
 	 * intros and the desk-to-stage transition would never appear. Run
 	 * this BEFORE posting INTR_VRETRACE so old gfx completions are
 	 * delivered before the next game tick can tear down scene memory. */
+	const int rollbackSyncTest = port_rollback_synctest_begin();
 	port_vi_simulate_vblank();
 
 	/* Post a VI retrace event to the scheduler's message queue. See
@@ -728,6 +740,9 @@ void PortPushFrame(void)
 	 *   Round 3+: Display list submitted, scheduler processes GFX task, etc.
 	 * Each thread runs until it yields at osRecvMesg(BLOCK) on empty queue. */
 	port_resume_service_threads();
+	if (rollbackSyncTest) {
+		port_rollback_synctest_end(PortResimulateFrame);
+	}
 
 	port_enhancement_stage_hazards_tick();
 	port_widescreen_tick();

@@ -69,6 +69,16 @@ void portRelocResetPointerTable(void);
  */
 void portRelocInvalidateRange(const void *base, size_t size);
 
+/**
+ * Rollback support: while enabled, slot changes are journaled so the table
+ * can be rewound to a mark taken with a snapshot. ForgetBefore drops history
+ * no snapshot needs any more.
+ */
+void portRelocJournalSetEnabled(int enabled);
+size_t portRelocJournalMark(void);
+void portRelocJournalUndoTo(size_t mark);
+void portRelocJournalForgetBefore(size_t mark);
+
 #ifdef __cplusplus
 }
 #endif

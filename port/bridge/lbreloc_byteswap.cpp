@@ -593,24 +593,46 @@ static void tex_dump_chain(int file_id, uint32_t file_off,
 }
 
 // Tracks which (base + offset) regions have been fixed to prevent
+// Rollback support: the trackers below record in-place conversions of game
+// memory, so a rollback that rewinds that memory must rewind them too.
+// Tracked<> bumps sFixupVersion on every mutation (versions are never
+// reused), letting portFixupStateCapture() copy them only when they changed.
+static uint64_t sFixupVersion = 0;
+static uint64_t sFixupVersionCounter = 0;
+
+static void fixupStateChanged(void)
+{
+	sFixupVersion = ++sFixupVersionCounter;
+}
+
+template <class C>
+struct Tracked : C {
+	using C::C;
+	template <class... A> auto insert(A &&...a) { fixupStateChanged(); return C::insert(std::forward<A>(a)...); }
+	template <class... A> auto erase(A &&...a) { fixupStateChanged(); return C::erase(std::forward<A>(a)...); }
+	template <class K> auto &operator[](K &&k) { fixupStateChanged(); return C::operator[](std::forward<K>(k)); }
+	void push_back(const typename C::value_type &v) { fixupStateChanged(); C::push_back(v); }
+	void clear() { fixupStateChanged(); C::clear(); }
+};
+
 // double-fixup. Used by per-struct fixups (Sprite, Bitmap, MObjSub, etc.),
 // pass2 vertex fixups, the chain-walk texture fixup, and the runtime
 // lazy vertex fixup. All paths share this set so they don't undo each
 // other's work. Cleared at scene change via portResetStructFixups.
-static std::unordered_set<uintptr_t> sStructU16Fixups;
+static Tracked<std::unordered_set<uintptr_t>> sStructU16Fixups;
 
 // Tracks runtime texture bases that own at least one fixed word, plus the
 // largest request size seen from that base. This preserves the old pass2/chain
 // skip behavior for exact-base matches while sTexFixupWords handles the actual
 // per-word idempotency.
-static std::unordered_map<uintptr_t, unsigned int> sTexFixupExtent;
+static Tracked<std::unordered_map<uintptr_t, unsigned int>> sTexFixupExtent;
 
 // Runtime texture/TLUT fixups can overlap even when they start at different
 // addresses. CSS gate palettes are adjacent 0x28-byte blocks, but their Sprite
 // requests a 512-byte TLUT load from each block. Track each u32 word so the
 // second overlapping load skips words fixed by the first instead of BSWAPing
 // them back to the wrong byte order.
-static std::unordered_set<uintptr_t> sTexFixupWords;
+static Tracked<std::unordered_set<uintptr_t>> sTexFixupWords;
 
 // Tracks memory ranges of decoded struct arrays that runtime texture/palette
 // BSWAPs must NOT touch. Certain N64 sprite files intentionally overlap the
@@ -623,12 +645,12 @@ static std::unordered_set<uintptr_t> sTexFixupWords;
 // Entries are (begin, end) pairs. Cleared at scene change via
 // portResetStructFixups.
 struct ProtectedRange { uintptr_t begin; uintptr_t end; };
-static std::vector<ProtectedRange> sProtectedStructRanges;
+static Tracked<std::vector<ProtectedRange>> sProtectedStructRanges;
 
 // Separate tracking for post-decode 4c sprite deswizzle (portDeswizzleDecodedSprite4c).
 // Needs its own set because portFixupSpriteBitmapData already inserted the same buf
 // addresses during the pre-decode BSWAP32 pass.
-static std::unordered_set<uintptr_t> sDeswizzle4cFixups;
+static Tracked<std::unordered_set<uintptr_t>> sDeswizzle4cFixups;
 
 /* Absolute addresses of every tokenized reloc chain slot currently live.
  * Texel data never contains chain slots, so a runtime texture fixup whose
@@ -639,7 +661,7 @@ static std::unordered_set<uintptr_t> sDeswizzle4cFixups;
  * unrecognizable, item spawn walks running off the array into float data
  * → textureless objects, "impossible" token warnings (byte-swapped
  * tokens), and SIGSEGV in gcSetupCustomDObjsWithMObj. */
-static std::unordered_set<uintptr_t> sChainSlotAddrs;
+static Tracked<std::unordered_set<uintptr_t>> sChainSlotAddrs;
 
 extern "C" void portRelocNoteChainSlot(const void *slot)
 {
@@ -1051,6 +1073,7 @@ extern "C" void portResetStructFixups(void)
 
 extern "C" void portEvictStructFixupsInRange(const void *begin, size_t size)
 {
+	fixupStateChanged(); // the eviction below works through base-class references
 	if (begin == nullptr || size == 0)
 		return;
 
@@ -2296,4 +2319,42 @@ extern "C" void portMarkSyntheticSprite(void *sprite, void *bitmaps,
 			sDeswizzle4cFixups.insert(key);
 		}
 	}
+}
+
+/* Rollback snapshots of the fixup trackers (see Tracked<> above). Capture
+ * returns the previous copy while nothing changed, so a snapshot per frame
+ * costs nothing between file loads. */
+struct PortFixupState {
+	uint64_t version;
+	std::unordered_set<uintptr_t> structU16Fixups;
+	std::unordered_map<uintptr_t, unsigned int> texFixupExtent;
+	std::unordered_set<uintptr_t> texFixupWords;
+	std::vector<ProtectedRange> protectedStructRanges;
+	std::unordered_set<uintptr_t> deswizzle4cFixups;
+	std::unordered_set<uintptr_t> chainSlotAddrs;
+};
+
+std::shared_ptr<const PortFixupState> portFixupStateCapture(void)
+{
+	static std::shared_ptr<const PortFixupState> sLast;
+	if (!sLast || sLast->version != sFixupVersion) {
+		sLast = std::make_shared<const PortFixupState>(PortFixupState{
+			sFixupVersion, sStructU16Fixups, sTexFixupExtent, sTexFixupWords, sProtectedStructRanges,
+			sDeswizzle4cFixups, sChainSlotAddrs });
+	}
+	return sLast;
+}
+
+void portFixupStateRestore(const std::shared_ptr<const PortFixupState> &state)
+{
+	if (!state || state->version == sFixupVersion) {
+		return;
+	}
+	static_cast<std::unordered_set<uintptr_t> &>(sStructU16Fixups) = state->structU16Fixups;
+	static_cast<std::unordered_map<uintptr_t, unsigned int> &>(sTexFixupExtent) = state->texFixupExtent;
+	static_cast<std::unordered_set<uintptr_t> &>(sTexFixupWords) = state->texFixupWords;
+	static_cast<std::vector<ProtectedRange> &>(sProtectedStructRanges) = state->protectedStructRanges;
+	static_cast<std::unordered_set<uintptr_t> &>(sDeswizzle4cFixups) = state->deswizzle4cFixups;
+	static_cast<std::unordered_set<uintptr_t> &>(sChainSlotAddrs) = state->chainSlotAddrs;
+	sFixupVersion = state->version;
 }
