@@ -114,3 +114,5 @@ debug_traces/
 # Local extraction / scratch directories used during debugging
 extract/
 test.zip
+# Per-machine iOS app ID chosen by ios/build-and-install.sh
+.ios-bundle-id
