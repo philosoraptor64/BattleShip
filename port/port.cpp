@@ -841,10 +841,16 @@ static int PortInitImpl(int argc, char* argv[]) {
 	 * host, libultraship's Config::GetWindowBackend() fallback
 	 * downgrades to OpenGL automatically — this write only changes the
 	 * preferred default. */
-	sContext->GetConfig()->SetInt(
-		"Window.Backend.Id",
-		static_cast<int>(Ship::WindowBackend::FAST3D_SDL_METAL));
-	sContext->GetConfig()->SetString("Window.Backend.Name", "Metal");
+	{
+		/* Debug override: SSB64_RENDER_BACKEND=opengl compares backends. */
+		const char *be = std::getenv("SSB64_RENDER_BACKEND");
+		bool gl = (be != NULL) && (strcmp(be, "opengl") == 0);
+		sContext->GetConfig()->SetInt(
+			"Window.Backend.Id",
+			static_cast<int>(gl ? Ship::WindowBackend::FAST3D_SDL_OPENGL
+			                    : Ship::WindowBackend::FAST3D_SDL_METAL));
+		sContext->GetConfig()->SetString("Window.Backend.Name", gl ? "OpenGL" : "Metal");
+	}
 #endif
 
 	/* New init order:
