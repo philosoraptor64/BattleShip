@@ -1029,6 +1029,17 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/debug_tools
     ${SSB64_CSS_GEN_DIR}                         # CSS icon baked headers (arrow_data.h)
 )
+
+# Netplay build fingerprint: players can only pair with identical builds
+# (cmake/NetplayBuildId.cmake). Rewritten only when it changes, and included
+# by port/net/netplay_rendezvous.cpp alone, so a new ID rebuilds one file.
+include(NetplayBuildId)
+ssb64_compute_netplay_build_id(SSB64_NETPLAY_BUILD_ID)
+message(STATUS "Netplay build ID: ${SSB64_NETPLAY_BUILD_ID}")
+file(CONFIGURE OUTPUT "${CMAKE_BINARY_DIR}/generated/netplay_build_id.h"
+     CONTENT "#pragma once\n#define SSB64_NETPLAY_BUILD_ID \"@SSB64_NETPLAY_BUILD_ID@\"\n" @ONLY)
+target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_BINARY_DIR}/generated")
+
 if (NOT CMAKE_SYSTEM_NAME STREQUAL "Android" AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT BATTLESHIP_UWP)
     target_include_directories(${PROJECT_NAME} PRIVATE
         ${SSB64_ICON_GEN_DIR}                         # Generated icon header (port_icon_data.h)

@@ -76,3 +76,22 @@ __attribute__((constructor)) static void InstallInviteLinkHandlers(void) {
         class_addMethod(cls, @selector(scene:openURLContexts:), (IMP)OpenURLContexts, "v@:@@");
     }
 }
+
+/* Non-blocking alert for messages from game code (e.g. netplay failures):
+ * presented on the next run-loop pass, the game keeps running meanwhile. */
+extern "C" void port_ios_alert(const char* text) {
+    if (text == NULL) {
+        return;
+    }
+    NSString* message = [NSString stringWithUTF8String:text];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (@available(iOS 13.0, *)) {
+            for (UIScene* scene in UIApplication.sharedApplication.connectedScenes) {
+                if ([scene isKindOfClass:[UIWindowScene class]]) {
+                    ShowAlert(scene, message.UTF8String);
+                    break;
+                }
+            }
+        }
+    });
+}

@@ -180,12 +180,14 @@ class Session {
     std::string mLan;
     std::vector<sockaddr_in> mCandidates;
     sockaddr_in mPeer{};
+    std::string mError;
 };
 
 bool Session::WaitForPeer() {
     const int64_t deadline = NowMs() + (int64_t)(mCfg.wait_secs > 0 ? mCfg.wait_secs : 600) * 1000;
     int64_t next_register = 0;
     bool announced = false;
+    bool room_missing = false;
     char buf[1600];
 
     while (NowMs() < deadline) {
@@ -223,6 +225,7 @@ bool Session::WaitForPeer() {
             return true;
         } else if (f[0] == "ERR" && f.size() >= 2) {
             if (f[1] == "nosuchroom" && !mIsHost) {
+                room_missing = true;
                 if (!announced) {
                     mLog("n64net: room %s not open yet - still trying\n", mRoom.c_str());
                     announced = true;
@@ -231,13 +234,18 @@ bool Session::WaitForPeer() {
             }
             if (f[1] == "auth") {
                 mLog("n64net: server refused the password (check SSB64_NETPLAY_PASSWORD and the clock)\n");
+            } else if (f[1] == "version") {
+                mLog("n64net: the host runs a different build (%s); both players need the same version\n",
+                     f.size() >= 3 ? f[2].c_str() : "?");
             } else {
                 mLog("n64net: server refused: %s\n", f[1].c_str());
             }
+            mError = f[1] + (f[1] == "version" && f.size() >= 3 ? " " + f[2] : "");
             return false;
         }
     }
     mLog("n64net: gave up waiting for the other player\n");
+    mError = room_missing ? "noroom" : "timeout";
     return false;
 }
 
@@ -331,16 +339,19 @@ bool Session::RequestRelay() {
         }
     }
     mLog("n64net: relay request timed out\n");
+    mError = "relay";
     return false;
 }
 
 int Session::Run(N64NetRendezvousResult *out) {
     if (mCfg.server == nullptr || mCfg.game == nullptr || !Resolve(mCfg.server, &mServer)) {
         mLog("n64net: cannot resolve server '%s'\n", mCfg.server ? mCfg.server : "(null)");
+        std::snprintf(out->error, sizeof(out->error), "resolve");
         return -1;
     }
     if (!mIsHost && mRoom.size() != 4) {
         mLog("n64net: joining needs a 4-character room code\n");
+        std::snprintf(out->error, sizeof(out->error), "args");
         return -1;
     }
     mLan = LanAddr(mSock, mServer);
@@ -348,6 +359,7 @@ int Session::Run(N64NetRendezvousResult *out) {
          mRoom.empty() ? "(random)" : mRoom.c_str(), AddrStr(mServer).c_str(), mLan.c_str());
 
     if (!WaitForPeer()) {
+        std::snprintf(out->error, sizeof(out->error), "%s", mError.c_str());
         return -2;
     }
     bool relayed = false;
@@ -356,6 +368,7 @@ int Session::Run(N64NetRendezvousResult *out) {
             mLog("n64net: no direct path after %d ms; asking the server to relay\n", kPunchTimeoutMs);
         }
         if (!RequestRelay()) {
+            std::snprintf(out->error, sizeof(out->error), "%s", mError.c_str());
             return -3;
         }
         relayed = true;

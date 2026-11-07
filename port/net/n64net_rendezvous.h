@@ -15,7 +15,8 @@ extern "C" {
 
 typedef struct N64NetRendezvousConfig {
     const char *server;      /* "host:port"; host may be a DNS name */
-    const char *game;        /* game + protocol id; only equal ids pair up */
+    const char *game;        /* "<game>+<build>": only equal ids pair up; a
+                                differing build fails with error "version" */
     const char *room;        /* 4-char code; NULL/"" lets the host get a random one */
     const char *password;    /* server password, or NULL/"" for an open server */
     int is_host;             /* 1 = create the room, 0 = join it */
@@ -30,6 +31,10 @@ typedef struct N64NetRendezvousResult {
     int relayed;             /* 1 = peer is the server, which forwards */
     int is_host;             /* role (a joiner is never host) */
     char room[8];
+    /* On failure, why (for the player): "version <host_build>", "auth",
+     * "noroom" (the code was never hosted), "timeout", "full", "taken",
+     * "game", "badcode", "busy", "resolve", "relay", "args". */
+    char error[64];
 } N64NetRendezvousResult;
 
 /* Blocks until connected, failed or timed out. Returns 0 on success.
