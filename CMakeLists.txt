@@ -413,8 +413,12 @@ set(SSB64_CSS_BF_NAME_PNG    ${SSB64_CSS_STAGE_ASSET_DIR}/battlefield_name.png)
 # 8-byte-aligned (W=6 visual → W=8 canvas, transparent padding centered).
 # Two variants: right-pointing (default) and left-pointing (--mirror) so the
 # second-page indicator doesn't depend on negative SObj scalex.
-set(SSB64_CSS_ARROW_PNG       ${CMAKE_CURRENT_SOURCE_DIR}/port/assets/css_icons/arrow.png)
-set(SSB64_CSS_ARROW_LEFT_PNG  ${CMAKE_CURRENT_SOURCE_DIR}/port/assets/css_icons/arrow_left.png)
+# The scroll-arrow PNGs are generated (tools/generate_arrow_svg.py) and only
+# feed the baked headers below, so generate them into the build tree: writing
+# them over port/assets made every build with a different Pillow version
+# "modify" tracked files (and change the netplay build fingerprint).
+set(SSB64_CSS_ARROW_PNG       ${SSB64_CSS_GEN_DIR}/arrow.png)
+set(SSB64_CSS_ARROW_LEFT_PNG  ${SSB64_CSS_GEN_DIR}/arrow_left.png)
 set(SSB64_CSS_ARROW_H         ${SSB64_CSS_GEN_DIR}/arrow_data.h)
 set(SSB64_CSS_ARROW_LEFT_H    ${SSB64_CSS_GEN_DIR}/arrow_left_data.h)
 
