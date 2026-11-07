@@ -28,6 +28,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
@@ -384,12 +385,10 @@ static void tex_dump_init_once()
 		return;
 	}
 	// Best-effort directory create.  On Windows the binary's CWD is
-	// build/Debug, so this lands at build/Debug/tex_dump/.
-#if defined(_WIN32)
-	std::system("if not exist tex_dump mkdir tex_dump");
-#else
-	std::system("mkdir -p tex_dump");
-#endif
+	// build/Debug, so this lands at build/Debug/tex_dump/.  (std::system is
+	// unavailable on iOS.)
+	std::error_code ec;
+	std::filesystem::create_directories("tex_dump", ec);
 	sTexDumpState = 1;
 }
 

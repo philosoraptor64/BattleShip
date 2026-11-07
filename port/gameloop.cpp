@@ -733,7 +733,7 @@ void PortPushFrame(void)
 	port_widescreen_tick();
 
 #if !defined(__ANDROID__)
-#if !defined(BATTLESHIP_UWP)
+#if !defined(BATTLESHIP_UWP) && !defined(BATTLESHIP_IOS)
 	ssb64::enhancements::TickDiscordPresence(); // DRP
 #endif
 #endif

@@ -242,6 +242,18 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Android")
     # was forced above). The libtorch_runner.so SHARED library at the
     # bottom of this file wraps it for JNI.
     add_subdirectory(torch ${CMAKE_BINARY_DIR}/torch)
+elseif (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    # iOS: an ExternalProject would inherit the Xcode/iOS settings and build
+    # Torch as a signed iOS target. Reuse the host Torch from a desktop build
+    # instead (it only runs on the Mac at build time).
+    set(SSB64_IOS_HOST_TORCH "${CMAKE_SOURCE_DIR}/build-us-release/torch" CACHE FILEPATH
+        "Host (macOS) torch executable from a desktop build")
+    if (NOT EXISTS "${SSB64_IOS_HOST_TORCH}")
+        message(FATAL_ERROR "iOS build needs a desktop build first for its torch: ${SSB64_IOS_HOST_TORCH}")
+    endif()
+    add_custom_target(TorchExternal)
+    set(TORCH_EXECUTABLE "${SSB64_IOS_HOST_TORCH}")
+    set(TORCH_SIDECAR_NAME torch)
 else()
     # Desktop: build Torch as a host executable via ExternalProject so it
     # can run at our build time to extract ROM assets.
@@ -552,6 +564,15 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Android")
         "port/enhancements/(Updater|DiscordRichPresence|ShaderDownloader)\\.cpp$")
     list(FILTER SSB64_SRC_PORT EXCLUDE REGEX "port/port_window_icon\\.cpp$")
 endif()
+if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    # Same desktop-only features as Android (see above); the matching menu
+    # entries are gated on BATTLESHIP_IOS in port/gui/PortMenu.cpp.
+    list(FILTER SSB64_SRC_PORT EXCLUDE REGEX "port/android_torch_bridge\\.cpp$")
+    list(FILTER SSB64_SRC_PORT EXCLUDE REGEX
+        "port/enhancements/(Updater|DiscordRichPresence|ShaderDownloader)\\.cpp$")
+    list(FILTER SSB64_SRC_PORT EXCLUDE REGEX "port/port_window_icon\\.cpp$")
+    add_compile_definitions(BATTLESHIP_IOS=1)
+endif()
 if(BATTLESHIP_UWP)
     # Xbox packages are updated as MSIX and cannot use these Win32
     # shell-out/IPC integrations.
@@ -562,7 +583,7 @@ if(BATTLESHIP_UWP)
 endif()
 # Treat the generated icon header as a source so CMake schedules it ahead
 # of any port TU compilation (port_window_icon.cpp #includes it).
-if (NOT CMAKE_SYSTEM_NAME STREQUAL "Android" AND NOT BATTLESHIP_UWP)
+if (NOT CMAKE_SYSTEM_NAME STREQUAL "Android" AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT BATTLESHIP_UWP)
     list(APPEND SSB64_SRC_PORT ${SSB64_ICON_GEN})
 endif()
 # Arrow + nameplate baked headers — added as sources so CMake schedules their
@@ -846,7 +867,7 @@ endif()
 # Fetch Discord RPC (desktop only — Android drops Discord Rich Presence
 # along with the rest of the network-dependent features).
 ################################################################################
-if (NOT CMAKE_SYSTEM_NAME STREQUAL "Android" AND NOT BATTLESHIP_UWP)
+if (NOT CMAKE_SYSTEM_NAME STREQUAL "Android" AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT BATTLESHIP_UWP)
     # discord-rpc v3.4.0's CMakeLists declares cmake_minimum_required(VERSION 2.x),
     # which CMake 3.30+ refuses to honor. Force a baseline policy version for the
     # fetched subdir so the build still configures with current CMake.
@@ -920,6 +941,27 @@ else()
     set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "${SSB64_APP_NAME}")
 endif()
 
+if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    # iOS app bundle. There is no ROM-extraction flow on device: the build
+    # extracts the user's BattleShip.o2r on the Mac (host torch) and the
+    # end of this file moves the game data into <App>.app/GameData, which
+    # port_ios_prepare() stages into Documents at first launch.
+    set(SSB64_IOS_BUNDLE_ID "io.github.philosoraptor.battleship" CACHE STRING "iOS bundle identifier")
+    set(SSB64_IOS_TEAM "" CACHE STRING "Apple development team ID for signing")
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/ios/Info.plist.in"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "${SSB64_IOS_BUNDLE_ID}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "1"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
+        XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "${SSB64_IOS_BUNDLE_ID}"
+        XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
+        XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
+        XCODE_ATTRIBUTE_DEVELOPMENT_TEAM "${SSB64_IOS_TEAM}"
+        XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY "Apple Development"
+    )
+endif()
+
 if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set_target_properties(ssb64_game PROPERTIES
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>"
@@ -948,7 +990,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/debug_tools
     ${SSB64_CSS_GEN_DIR}                         # CSS icon baked headers (arrow_data.h)
 )
-if (NOT CMAKE_SYSTEM_NAME STREQUAL "Android" AND NOT BATTLESHIP_UWP)
+if (NOT CMAKE_SYSTEM_NAME STREQUAL "Android" AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT BATTLESHIP_UWP)
     target_include_directories(${PROJECT_NAME} PRIVATE
         ${SSB64_ICON_GEN_DIR}                         # Generated icon header (port_icon_data.h)
         ${discord_rpc_SOURCE_DIR}/include             # Discord Rich Presence
@@ -971,6 +1013,9 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Android")
 elseif(BATTLESHIP_UWP)
     add_dependencies(${PROJECT_NAME} libultraship TorchExternal)
     target_link_libraries(${PROJECT_NAME} PRIVATE libultraship SDL2 LIBUWP GLFW3)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    add_dependencies(${PROJECT_NAME} libultraship TorchExternal)
+    target_link_libraries(${PROJECT_NAME} PRIVATE libultraship)
 else()
     add_dependencies(${PROJECT_NAME} libultraship TorchExternal discord-rpc)
     target_link_libraries(${PROJECT_NAME} PRIVATE libultraship discord-rpc)
@@ -1494,4 +1539,25 @@ endif()
 ################################################################################
 if (NOT DISABLE_SCRIPTING)
     include(ModO2R)
+endif()
+
+################################################################################
+# iOS: tidy the app bundle (must stay last so it runs after every staging step)
+################################################################################
+# The desktop POST_BUILD steps above stage game data next to the binary,
+# which on iOS is the bundle root. Move what the game loads into GameData/
+# and drop the desktop-only extraction inputs (incl. the macOS torch binary,
+# which must not ship inside an iOS bundle).
+if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(_ios_app "$<TARGET_BUNDLE_DIR:${PROJECT_NAME}>")
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_ios_app}/GameData"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_ios_app}/GameData"
+        COMMAND ${CMAKE_COMMAND} -E rename "${_ios_app}/${SSB64_APP_NAME}.o2r" "${_ios_app}/GameData/${SSB64_APP_NAME}.o2r"
+        COMMAND ${CMAKE_COMMAND} -E rename "${_ios_app}/f3d.o2r" "${_ios_app}/GameData/f3d.o2r"
+        COMMAND ${CMAKE_COMMAND} -E rename "${_ios_app}/gamecontrollerdb.txt" "${_ios_app}/GameData/gamecontrollerdb.txt"
+        COMMAND ${CMAKE_COMMAND} -E rename "${_ios_app}/assets" "${_ios_app}/GameData/assets"
+        COMMAND ${CMAKE_COMMAND} -E rm -rf "${_ios_app}/torch" "${_ios_app}/config.yml" "${_ios_app}/yamls"
+        COMMENT "iOS: moving game data into the bundle's GameData/"
+    )
 endif()

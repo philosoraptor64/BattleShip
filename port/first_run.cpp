@@ -282,6 +282,12 @@ bool RunTorchCommand(const std::string& commandLine, const std::string& workingD
         return false;
     }
     return true;
+#elif defined(BATTLESHIP_IOS)
+    (void)workingDir;
+    (void)commandLine;
+    (void)logPath;
+    error = "On-device asset extraction is not supported on iOS; rebuild the app with BattleShip.o2r bundled";
+    return false;
 #else
     const std::string shellCommand =
         "cd " + QuoteCommandArg(workingDir) + " && " + commandLine + " > " + QuoteCommandArg(logPath) + " 2>&1";
@@ -367,10 +373,11 @@ ExtractionResult ExtractAssetsIfNeeded(const std::string& target_o2r_path, bool 
     const fs::path targetPath = ec ? fs::path(target_o2r_path) : absoluteTargetPath;
     bool staleRecipe = false;
     if (fs::exists(targetPath)) {
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(BATTLESHIP_IOS)
         /* Android extraction goes through the Java RomImporter flow (which
          * has its own asset sentinel) and the staged ROM is deleted after
-         * extraction, so a recipe re-extract could never succeed here. */
+         * extraction, so a recipe re-extract could never succeed here.
+         * iOS ships the o2r prebuilt in the app bundle (no on-device Torch). */
         return { true, targetPath.string(), {}, {} };
 #else
         const std::string have = ReadRecipeSidecar(targetPath);

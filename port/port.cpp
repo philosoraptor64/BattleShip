@@ -2,7 +2,7 @@
 // the .so via dlsym("SDL_main"), so we let SDL_main.h's `#define main SDL_main`
 // rename the entry point during preprocessing — which is exactly what
 // SDL_MAIN_HANDLED would suppress.
-#if !defined(__ANDROID__) && !defined(BATTLESHIP_UWP)
+#if !defined(__ANDROID__) && !defined(BATTLESHIP_UWP) && !defined(BATTLESHIP_IOS)
 #define SDL_MAIN_HANDLED
 #endif
 #include "port.h"
@@ -51,6 +51,7 @@
 #endif
 #include "renderdoc_trigger.h"
 #include "port_log.h"
+#include "port_ios.h"
 #include "fighter_registry.h"
 #include "focus.h"
 #include "shaders/fast3d_shader_manifest.h"
@@ -915,7 +916,7 @@ static int PortInitImpl(int argc, char* argv[]) {
 			port_log("SSB64: Port menu attached\n");
 		}
 
-#if !defined(__ANDROID__) && !defined(BATTLESHIP_UWP)
+#if !defined(__ANDROID__) && !defined(BATTLESHIP_UWP) && !defined(BATTLESHIP_IOS)
 		// Linux: WMs only show the app icon if SDL_SetWindowIcon is called
 		// on the live window. .ico/.icns paths are baked into the .exe /
 		// .app on Windows / macOS so this is a no-op there. Android pulls
@@ -1256,6 +1257,10 @@ int PortIsRunning(void) {
 } // extern "C"
 
 int main(int argc, char* argv[]) {
+	/* iOS: stage bundled data into Documents and load netplay.cfg into the
+	 * environment before anything reads either. No-op elsewhere. */
+	port_ios_prepare();
+
 	/* Use an absolute path for ssb64.log so it lands in a predictable
 	 * place regardless of how the binary was launched (Finder / open /
 	 * shell from any cwd). SDL_GetPrefPath returns the OS app-data dir
