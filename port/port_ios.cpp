@@ -214,6 +214,7 @@ void LoadOnlineState(const fs::path& docs, PortIosMenuState* st) {
         else if (k == "PASSWORD") std::snprintf(st->password, sizeof(st->password), "%s", v.c_str());
         else if (k == "ROOM") std::snprintf(st->room, sizeof(st->room), "%s", v.c_str());
         else if (k == "LAST_HOST") st->last_was_host = (v == "1");
+        else if (k == "VOICE") st->voice = (v == "on") ? 1 : (v == "ptt") ? 2 : 0;
     }
 }
 
@@ -223,7 +224,8 @@ void SaveOnlineState(const fs::path& docs, const PortIosMenuState& st) {
         << "SERVER=" << st.server << "\n"
         << "PASSWORD=" << st.password << "\n"
         << "ROOM=" << st.room << "\n"
-        << "LAST_HOST=" << (st.last_was_host ? 1 : 0) << "\n";
+        << "LAST_HOST=" << (st.last_was_host ? 1 : 0) << "\n"
+        << "VOICE=" << (st.voice == 1 ? "on" : st.voice == 2 ? "ptt" : "off") << "\n";
 }
 
 // Turns an online choice into the SSB64_NETPLAY_* settings for this launch.
@@ -244,7 +246,10 @@ void ApplyOnlineChoice(const PortIosMenuState& st, bool host) {
     if (host) {
         setenv("SSB64_NETPLAY_HOST", "1", 1);
     }
-    port_log("ios: online %s, room %s\n", host ? "host" : "join", st.room);
+    if (st.voice != 0) {
+        setenv("SSB64_NETPLAY_VOICE", st.voice == 2 ? "ptt" : "1", 1);
+    }
+    port_log("ios: online %s, room %s, voice %d\n", host ? "host" : "join", st.room, st.voice);
 }
 
 // Start menu, unless an invite link already decided for this launch.

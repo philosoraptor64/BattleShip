@@ -15,6 +15,7 @@
 #include "rollback/rollback.h"
 #include "audio_playback.h"
 #include "port_log.h"
+#include "net/n64net_voice.h"
 
 #include <libultraship/bridge/audiobridge.h>
 
@@ -22,6 +23,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <chrono>
 #include <cmath>
 
 // SSB64 original output rate is 32 kHz.
@@ -204,6 +206,35 @@ static const int16_t* applyOutputFilter(const int16_t* input, int sampleCount)
     return sFilteredBuf;
 }
 
+// Online voice chat while the game is stalled (waiting for the other
+// player): the game submits no audio then, so keep the output fed with the
+// other player's voice over silence. Called from the voice pump, which also
+// runs during network waits.
+static std::chrono::steady_clock::time_point sLastAudioPush;  // game frame or voice top-up
+
+extern "C" void portAudioVoiceKeepAlive(void)
+{
+    if (!n64net_voice_is_running()) {
+        return;
+    }
+    // The game sends a block every ~16.7 ms while it runs. After 30 ms of
+    // nothing it has stalled: fill in exactly the real time that passed.
+    auto now = std::chrono::steady_clock::now();
+    auto idleMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - sLastAudioPush).count();
+    if (idleMs < 30) {
+        return;
+    }
+    static int16_t sVoiceOnly[1600 * 2];
+    int frames = static_cast<int>(idleMs * 32);
+    if (frames > 1600) {
+        frames = 1600;  // after a long gap (or the first call), don't flood the queue
+    }
+    std::memset(sVoiceOnly, 0, frames * 4);
+    n64net_voice_mix(sVoiceOnly, frames, 32000);
+    AudioPlayerPlayFrame(reinterpret_cast<const uint8_t*>(sVoiceOnly), (size_t)frames * 4);
+    sLastAudioPush = now - std::chrono::milliseconds(idleMs - frames / 32);
+}
+
 extern "C" void portAudioSubmitFrame(const void *buf, int sampleCount)
 {
     // Rollback resimulation re-runs frames whose audio already played.
@@ -243,7 +274,18 @@ extern "C" void portAudioSubmitFrame(const void *buf, int sampleCount)
     const int16_t* pcm = reinterpret_cast<const int16_t*>(buf);
     pcm = applyOutputFilter(pcm, sampleCount);
 
+    // Online voice chat: the other player's voice, after the game's filter.
+    if (n64net_voice_is_running()) {
+        static int16_t sVoiceMixBuf[4096 * 2];
+        if (sampleCount <= 4096) {
+            std::memcpy(sVoiceMixBuf, pcm, byteLen);
+            n64net_voice_mix(sVoiceMixBuf, sampleCount, 32000);
+            pcm = sVoiceMixBuf;
+        }
+    }
+
     wavAppend(pcm, byteLen);
 
     AudioPlayerPlayFrame(reinterpret_cast<const uint8_t*>(pcm), byteLen);
+    sLastAudioPush = std::chrono::steady_clock::now();
 }

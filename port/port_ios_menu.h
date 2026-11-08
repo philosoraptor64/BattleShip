@@ -16,6 +16,7 @@ typedef struct PortIosMenuState {
     char password[96];
     char room[8];        // last room code
     int last_was_host;   // the last online session hosted `room`
+    int voice;           // voice chat: 0 off, 1 open mic, 2 push to talk
     int settings_changed;
 } PortIosMenuState;
 

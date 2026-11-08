@@ -238,11 +238,16 @@ static PortMenuScreen* MakeSettings(void) {
     UITextField* server = [s addField:@"Server (e.g. 203.0.113.5:7780)" text:Str(sState->server) secure:NO];
     server.keyboardType = UIKeyboardTypeURL;
     UITextField* password = [s addField:@"Password" text:Str(sState->password) secure:YES];
+    [s addText:@"Voice chat with the other player (headphones avoid echo):"];
+    UISegmentedControl* voice = [[UISegmentedControl alloc] initWithItems:@[ @"Off", @"Open mic", @"Push to talk" ]];
+    voice.selectedSegmentIndex = sState->voice;
+    [s.stack addArrangedSubview:voice];
     __weak PortMenuScreen* w = s;
     [s addButton:@"Save" primary:YES action:^{
         Copy(sState->server, sizeof(sState->server),
              [server.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet]);
         Copy(sState->password, sizeof(sState->password), password.text);
+        sState->voice = (int)voice.selectedSegmentIndex;
         sState->settings_changed = 1;
         [w.navigationController popToRootViewControllerAnimated:YES];
     }];
