@@ -768,6 +768,8 @@ endif()
 ################################################################################
 
 add_library(ssb64_game OBJECT ${SSB64_DECOMP_SOURCES})
+# The netcode (decomp/src/sys/net*.c) uses the shared n64net input exchange.
+target_include_directories(ssb64_game PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/n64net/client/include)
 
 # Port stub definitions (C code that satisfies N64 linker symbols)
 file(GLOB SSB64_STUBS "port/stubs/*.c")
@@ -1064,7 +1066,10 @@ foreach(path ${_ssb64_sim_paths})
 endforeach()
 list(APPEND _ssb64_build_id_entries
     "${CMAKE_CURRENT_SOURCE_DIR}/decomp::src" "${CMAKE_CURRENT_SOURCE_DIR}/decomp::include"
-    "${CMAKE_CURRENT_SOURCE_DIR}/torch::src")
+    "${CMAKE_CURRENT_SOURCE_DIR}/torch::src"
+    # n64net's input exchange decides what both games simulate (and its wire format).
+    "${CMAKE_CURRENT_SOURCE_DIR}/n64net::client/src/n64net_input.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/n64net::client/include/n64net_input.h")
 n64net_add_build_id(${PROJECT_NAME}
     HEADER  ${CMAKE_BINARY_DIR}/generated/netplay_build_id.h
     MACRO   SSB64_NETPLAY_BUILD_ID
