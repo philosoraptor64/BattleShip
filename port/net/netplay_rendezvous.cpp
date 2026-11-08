@@ -139,7 +139,7 @@ extern "C" int port_netplay_rendezvous(int sock, int is_host, struct sockaddr_in
     {
         std::string room = (cfg.room && cfg.room[0]) ? cfg.room : "";
         std::string text = is_host ? "Room " + room + " is open. Waiting for the other player to join..."
-                                   : "Joining room " + room + ". Waiting for the host to start a match...";
+                                   : "Joining room " + room + "...";
         port_netplay_status(is_host ? "Hosting an online match" : "Joining an online match", text.c_str());
     }
     N64NetRendezvousResult result{};

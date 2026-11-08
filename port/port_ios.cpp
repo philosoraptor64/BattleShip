@@ -230,7 +230,10 @@ void SaveOnlineState(const fs::path& docs, const PortIosMenuState& st) {
 void ApplyOnlineChoice(const PortIosMenuState& st, bool host) {
     setenv("SSB64_NETPLAY", "1", 1);
     setenv("SSB64_NETPLAY_BOOTSTRAP", "1", 1);
-    setenv("SSB64_NETPLAY_LOBBY", "1", 1);
+    // A full online session: once both are connected, the whole game runs on
+    // both phones from the same inputs (menus, character select with CPUs
+    // and teams, stage select, battles, results), as if on one console.
+    setenv("SSB64_NETPLAY_MODE", "session", 1);
     setenv("SSB64_NETPLAY_SERVER", st.server, 1);
     setenv("SSB64_NETPLAY_ROOM", st.room, 1);
     if (st.password[0] != '\0') {
@@ -401,8 +404,8 @@ extern "C" const char* port_ios_handle_open_url(const char* url, int app_running
     std::ofstream(docs / "online-pending.cfg", std::ios::trunc) << "MODE=" << (host ? "host" : "join") << "\n";
     port_log("ios: invite saved for room %s via %s (%s)\n", room.c_str(), server.c_str(), host ? "host" : "join");
     message = host ? "This iPhone will host room " + room +
-                         ". Close BattleShip (swipe it away) and open it again, then set up a VS match: "
-                         "Player 2 (set to CPU) is your online opponent."
+                         ". Close BattleShip (swipe it away) and open it again; when your friend joins, "
+                         "both games open the VS menu together."
                    : "Invite saved for room " + room +
                          ". Close BattleShip (swipe it away in the app switcher) and open it again to join.";
     return app_running ? message.c_str() : nullptr;

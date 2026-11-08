@@ -165,7 +165,7 @@ static PortMenuScreen* MakeJoin(void) {
     s.title = @"Join";
     s.view.hidden = NO;
     [s addTitle:@"Join a match"];
-    [s addText:@"Enter the 4-character room code from the host."];
+    [s addText:@"Enter the 4-character room code from the host. When you're connected, both games go to the VS menu together."];
     UITextField* code = [s addField:@"Room code" text:Str(sState->room) secure:NO];
     code.autocapitalizationType = UITextAutocapitalizationTypeAllCharacters;
     code.textAlignment = NSTextAlignmentCenter;
@@ -197,8 +197,9 @@ static PortMenuScreen* MakeHost(void) {
     [s addTitle:@"Host a match"];
     UILabel* code = [s addTitle:room];
     code.font = [UIFont monospacedSystemFontOfSize:44 weight:UIFontWeightBold];
-    [s addText:@"Your room code. Send your friend the invite link (or just the code), then set up the match: "
-               @"Player 2, set to CPU, is your online opponent. The room opens when the match would start."];
+    [s addText:@"Your room code. Send your friend the invite link (or just the code), then open the room. "
+               @"When they join, both games go to the VS menu together: you're player 1, they're player 2, "
+               @"and you pick characters, CPUs, teams and the stage just like on one console."];
     UILabel* error = [s addText:@""];
     error.textColor = [UIColor colorWithRed:1 green:0.45 blue:0.45 alpha:1];
     __weak PortMenuScreen* w = s;
@@ -217,7 +218,7 @@ static PortMenuScreen* MakeHost(void) {
         room = NewRoomCode();
         code.text = room;
     }];
-    [s addButton:@"Set up the match" primary:YES action:^{
+    [s addButton:@"Open the room" primary:YES action:^{
         if (!HasServer()) {
             error.text = @"Set the server first (Online settings).";
             return;
