@@ -10,3 +10,6 @@
 	path = decomp
 	url = https://github.com/philosoraptor64/ssb-decomp-re.git
 	branch = battleship-netplay
+[submodule "n64net"]
+	path = n64net
+	url = https://github.com/philosoraptor64/n64net.git

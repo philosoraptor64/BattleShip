@@ -9,7 +9,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import <UIKit/UIKit.h>
 
-#include "net/n64net_voice.h"
+#include "n64net_voice.h"
 
 extern "C" void port_log(const char* fmt, ...);
 

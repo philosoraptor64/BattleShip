@@ -10,7 +10,7 @@
  *   SSB64_NETPLAY_WAIT_SECS=600      how long to wait for the other player
  */
 #include "n64net_rendezvous.h"
-#include "netplay_build_id.h"  // generated: cmake/NetplayBuildId.cmake
+#include "netplay_build_id.h"  // generated: n64net_add_build_id (CMakeLists.txt)
 
 #include "coroutine.h"
 #include "port_watchdog.h"

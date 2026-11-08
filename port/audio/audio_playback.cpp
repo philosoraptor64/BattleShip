@@ -15,7 +15,7 @@
 #include "rollback/rollback.h"
 #include "audio_playback.h"
 #include "port_log.h"
-#include "net/n64net_voice.h"
+#include "n64net_voice.h"
 
 #include <libultraship/bridge/audiobridge.h>
 

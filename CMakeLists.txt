@@ -1040,20 +1040,35 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${SSB64_CSS_GEN_DIR}                         # CSS icon baked headers (arrow_data.h)
 )
 
-# Netplay build fingerprint: players can only pair with identical builds
-# (cmake/NetplayBuildId.cmake). Recomputed on every build; the header changes
-# only when the value does, and only port/net/netplay_rendezvous.cpp includes
-# it, so a new ID rebuilds one file.
-set(SSB64_NETPLAY_BUILD_ID_H "${CMAKE_BINARY_DIR}/generated/netplay_build_id.h")
-set(_ssb64_build_id_cmd ${CMAKE_COMMAND} -DSRC=${CMAKE_CURRENT_SOURCE_DIR} -DOUT=${SSB64_NETPLAY_BUILD_ID_H}
-    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/NetplayBuildId.cmake)
-execute_process(COMMAND ${_ssb64_build_id_cmd})  # so the header exists before the first build
-add_custom_target(ssb64_netplay_build_id
-    COMMAND ${_ssb64_build_id_cmd}
-    BYPRODUCTS ${SSB64_NETPLAY_BUILD_ID_H}
-    COMMENT "Netplay build fingerprint")
-add_dependencies(${PROJECT_NAME} ssb64_netplay_build_id)
-target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_BINARY_DIR}/generated")
+# Shared netplay library (n64net submodule): room-code client, voice chat
+# (Opus) and the build fingerprint helper.
+add_subdirectory(n64net ${CMAKE_BINARY_DIR}/n64net)
+target_link_libraries(${PROJECT_NAME} PRIVATE n64net)
+
+# Netplay build fingerprint: players can only pair with identical builds. It
+# covers only what decides a match: the decomp game code, the port code the
+# simulation runs through, and the asset extractor (uncommitted edits count).
+# Everything else (libultraship's graphics/audio/input, art, widescreen,
+# interpolation, platform glue, saves, the room-code client, build files) may
+# differ between players. Inputs are exchanged after the controller layer, so
+# input handling is out too. When adding a port file the simulation calls
+# into, add it here. Only port/net/netplay_rendezvous.cpp includes the header.
+set(_ssb64_sim_paths
+    port/rollback port/resource port/bridge port/stubs port/enhancements port/hooks
+    port/gameloop.cpp port/gameloop.h port/fighter_registry.cpp port/fighter_registry.h
+    port/port_aobj_fixup.cpp port/port_aobj_fixup.h port/net/netplay_settings.cpp port/net/netplay_settings.h
+    yamls config.yml)
+set(_ssb64_build_id_entries "")
+foreach(path ${_ssb64_sim_paths})
+    list(APPEND _ssb64_build_id_entries "${CMAKE_CURRENT_SOURCE_DIR}::${path}")
+endforeach()
+list(APPEND _ssb64_build_id_entries
+    "${CMAKE_CURRENT_SOURCE_DIR}/decomp::src" "${CMAKE_CURRENT_SOURCE_DIR}/decomp::include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/torch::src")
+n64net_add_build_id(${PROJECT_NAME}
+    HEADER  ${CMAKE_BINARY_DIR}/generated/netplay_build_id.h
+    MACRO   SSB64_NETPLAY_BUILD_ID
+    ENTRIES ${_ssb64_build_id_entries})
 
 if (NOT CMAKE_SYSTEM_NAME STREQUAL "Android" AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT BATTLESHIP_UWP)
     target_include_directories(${PROJECT_NAME} PRIVATE
@@ -1641,21 +1656,3 @@ if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
         COMMENT "iOS: moving game data into the bundle's GameData/ and Torch recipes into TorchRecipe/"
     )
 endif()
-
-
-# Voice chat codec (port/net/n64net_voice.cpp): Opus, built from source so the
-# Mac, iOS and every other platform use the same codec. BSD licensed.
-include(FetchContent)
-set(OPUS_BUILD_SHARED_LIBRARY OFF CACHE BOOL "" FORCE)
-set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
-set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
-set(OPUS_INSTALL_PKG_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
-set(OPUS_INSTALL_CMAKE_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(
-    opus
-    GIT_REPOSITORY https://github.com/xiph/opus.git
-    GIT_TAG        v1.5.2
-    GIT_SHALLOW    TRUE
-)
-FetchContent_MakeAvailable(opus)
-target_link_libraries(${PROJECT_NAME} PRIVATE opus)
