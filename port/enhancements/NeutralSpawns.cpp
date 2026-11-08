@@ -1,4 +1,5 @@
 #include "enhancements.h"
+#include "net/netplay_settings.h"
 #include <libultraship/bridge/consolevariablebridge.h>
 
 namespace ssb64 {
@@ -12,5 +13,5 @@ namespace ssb64 {
 } // namespace ssb64
 
 extern "C" int port_enhancement_neutral_spawns(void) {
-    return CVarGetInteger(ssb64::enhancements::NeutralSpawnsCVarName(), 0) != 0;
+    return port_netplay_setting(ssb64::enhancements::NeutralSpawnsCVarName(), CVarGetInteger(ssb64::enhancements::NeutralSpawnsCVarName(), 0)) != 0;
 }

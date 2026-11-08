@@ -30,7 +30,7 @@ function(ssb64_compute_netplay_build_id src out_var)
     set(port_paths
         port/rollback port/resource port/bridge port/stubs port/enhancements port/hooks
         port/gameloop.cpp port/gameloop.h port/fighter_registry.cpp port/fighter_registry.h
-        port/port_aobj_fixup.cpp port/port_aobj_fixup.h
+        port/port_aobj_fixup.cpp port/port_aobj_fixup.h port/net/netplay_settings.cpp port/net/netplay_settings.h
         yamls config.yml)
     # repo-relative path list -> "repo:path=<git object id>" lines + uncommitted diff
     set(parts "")

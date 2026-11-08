@@ -1,4 +1,5 @@
 #include "enhancements.h"
+#include "net/netplay_settings.h"
 
 #include <libultraship/bridge/consolevariablebridge.h>
 
@@ -14,7 +15,7 @@
 constexpr const char* kBonusStagesCVar = "gEnhancements.BonusStagesEnabled";
 
 extern "C" int port_enhancement_bonus_stages_enabled(void) {
-    return CVarGetInteger(kBonusStagesCVar, 1) != 0;
+    return port_netplay_setting(kBonusStagesCVar, CVarGetInteger(kBonusStagesCVar, 1)) != 0;
 }
 
 namespace ssb64 {

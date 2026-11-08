@@ -1,4 +1,5 @@
 #include "enhancements.h"
+#include "net/netplay_settings.h"
 
 #include <libultraship/bridge/consolevariablebridge.h>
 
@@ -213,7 +214,7 @@ void LatchBattleSettingIfNeeded() {
 
     BattleKey key = CurrentBattleKey();
     if (IsNewBattle(key)) {
-        sDisableHazardsForBattle = CVarGetInteger(kStageHazardsDisabledCVar, 0) != 0;
+        sDisableHazardsForBattle = port_netplay_setting(kStageHazardsDisabledCVar, CVarGetInteger(kStageHazardsDisabledCVar, 0)) != 0;
     }
 
     sWasInBattle = true;

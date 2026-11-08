@@ -1,4 +1,5 @@
 #include "enhancements.h"
+#include "net/netplay_settings.h"
 
 #include <libultraship/bridge/consolevariablebridge.h>
 
@@ -17,7 +18,7 @@ extern "C" int port_enhancement_tap_jump_disabled(int playerIndex) {
     if (playerIndex < 0 || playerIndex >= PORT_ENHANCEMENT_MAX_PLAYERS) {
         return 0;
     }
-    return CVarGetInteger(kTapJumpCVars[playerIndex], 0) != 0;
+    return port_netplay_setting(kTapJumpCVars[playerIndex], CVarGetInteger(kTapJumpCVars[playerIndex], 0)) != 0;
 }
 
 namespace ssb64 {
