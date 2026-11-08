@@ -16,6 +16,7 @@
  *     app (UIFileSharingEnabled + LSSupportsOpeningDocumentsInPlace).
  */
 #include "port_ios.h"
+#include "port_ios_menu.h"
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
@@ -171,15 +172,10 @@ bool EnsureGameData(const fs::path& docs) {
     return false;
 }
 
-void LoadNetplayConfig(const fs::path& docs) {
-    fs::path cfg = docs / "netplay.cfg";
-    std::error_code ec;
-
-    if (!fs::exists(cfg, ec)) {
-        std::ofstream(cfg) << kNetplayTemplate;
-        return;
-    }
-    std::ifstream in(cfg);
+// KEY=VALUE lines ('#' comments) of a file in Documents.
+std::vector<std::pair<std::string, std::string>> ReadKeyValues(const fs::path& path) {
+    std::vector<std::pair<std::string, std::string>> out;
+    std::ifstream in(path);
     std::string line;
     while (std::getline(in, line)) {
         size_t start = line.find_first_not_of(" \t\r");
@@ -201,9 +197,122 @@ void LoadNetplayConfig(const fs::path& docs) {
         size_t vstart = value.find_first_not_of(" \t");
         value = (vstart == std::string::npos) ? "" : value.substr(vstart);
         if (!key.empty()) {
-            setenv(key.c_str(), value.c_str(), 1);
+            out.emplace_back(key, value);
         }
     }
+    return out;
+}
+
+/* Online play settings, kept across launches: Documents/online.cfg holds
+ * SERVER, PASSWORD, ROOM and LAST_HOST (written by invite links and the start
+ * menu); Documents/online-pending.cfg (MODE=join|host) is a one-shot left by
+ * an invite link, so a launch from a link skips the menu. */
+void LoadOnlineState(const fs::path& docs, PortIosMenuState* st) {
+    *st = PortIosMenuState{};
+    for (auto& [k, v] : ReadKeyValues(docs / "online.cfg")) {
+        if (k == "SERVER") std::snprintf(st->server, sizeof(st->server), "%s", v.c_str());
+        else if (k == "PASSWORD") std::snprintf(st->password, sizeof(st->password), "%s", v.c_str());
+        else if (k == "ROOM") std::snprintf(st->room, sizeof(st->room), "%s", v.c_str());
+        else if (k == "LAST_HOST") st->last_was_host = (v == "1");
+    }
+}
+
+void SaveOnlineState(const fs::path& docs, const PortIosMenuState& st) {
+    std::ofstream out(docs / "online.cfg", std::ios::trunc);
+    out << "# Online play settings (written by invite links and the start menu).\n"
+        << "SERVER=" << st.server << "\n"
+        << "PASSWORD=" << st.password << "\n"
+        << "ROOM=" << st.room << "\n"
+        << "LAST_HOST=" << (st.last_was_host ? 1 : 0) << "\n";
+}
+
+// Turns an online choice into the SSB64_NETPLAY_* settings for this launch.
+void ApplyOnlineChoice(const PortIosMenuState& st, bool host) {
+    setenv("SSB64_NETPLAY", "1", 1);
+    setenv("SSB64_NETPLAY_BOOTSTRAP", "1", 1);
+    setenv("SSB64_NETPLAY_LOBBY", "1", 1);
+    setenv("SSB64_NETPLAY_SERVER", st.server, 1);
+    setenv("SSB64_NETPLAY_ROOM", st.room, 1);
+    if (st.password[0] != '\0') {
+        setenv("SSB64_NETPLAY_PASSWORD", st.password, 1);
+    }
+    setenv("SSB64_NETPLAY_ROLLBACK", "1", 1);
+    setenv("SSB64_NETPLAY_DELAY", "2", 1);
+    if (host) {
+        setenv("SSB64_NETPLAY_HOST", "1", 1);
+    }
+    port_log("ios: online %s, room %s\n", host ? "host" : "join", st.room);
+}
+
+// Start menu, unless an invite link already decided for this launch.
+void RunStartMenu(const fs::path& docs) {
+    PortIosMenuState st;
+    LoadOnlineState(docs, &st);
+    std::error_code ec;
+    const fs::path pending = docs / "online-pending.cfg";
+    std::string mode;
+    for (auto& [k, v] : ReadKeyValues(pending)) {
+        if (k == "MODE") mode = v;
+    }
+    fs::remove(pending, ec);
+
+    int choice;
+    if (mode == "join" || mode == "host") {
+        choice = (mode == "host") ? PORT_IOS_MENU_HOST : PORT_IOS_MENU_JOIN;
+    } else {
+        choice = port_ios_start_menu(&st);
+    }
+    if (choice == PORT_IOS_MENU_LOCAL) {
+        if (st.settings_changed) {
+            SaveOnlineState(docs, st);
+        }
+        return;
+    }
+    st.last_was_host = (choice == PORT_IOS_MENU_HOST);
+    SaveOnlineState(docs, st);
+    ApplyOnlineChoice(st, choice == PORT_IOS_MENU_HOST);
+}
+
+// Scripted settings (tests, advanced use). Returns true if it set anything,
+// in which case the start menu is skipped.
+bool LoadNetplayConfig(const fs::path& docs) {
+    fs::path cfg = docs / "netplay.cfg";
+    std::error_code ec;
+
+    if (!fs::exists(cfg, ec)) {
+        std::ofstream(cfg) << kNetplayTemplate;
+        return false;
+    }
+    // Older invite links wrote their settings here, which would skip the
+    // start menu on every launch: move them to online.cfg instead.
+    {
+        std::ifstream in(cfg);
+        std::string first;
+        std::getline(in, first);
+        if (first.rfind("# Written by an invite link", 0) == 0) {
+            PortIosMenuState st;
+            LoadOnlineState(docs, &st);
+            bool host = false;
+            for (auto& [k, v] : ReadKeyValues(cfg)) {
+                if (k == "SSB64_NETPLAY_SERVER") std::snprintf(st.server, sizeof(st.server), "%s", v.c_str());
+                else if (k == "SSB64_NETPLAY_PASSWORD") std::snprintf(st.password, sizeof(st.password), "%s", v.c_str());
+                else if (k == "SSB64_NETPLAY_ROOM") std::snprintf(st.room, sizeof(st.room), "%s", v.c_str());
+                else if (k == "SSB64_NETPLAY_HOST") host = (v == "1");
+            }
+            st.last_was_host = host ? 1 : 0;
+            SaveOnlineState(docs, st);
+            in.close();
+            std::ofstream(cfg, std::ios::trunc) << kNetplayTemplate;
+            port_log("ios: moved old invite settings to online.cfg\n");
+            return false;
+        }
+    }
+    bool any = false;
+    for (auto& [key, value] : ReadKeyValues(cfg)) {
+        setenv(key.c_str(), value.c_str(), 1);
+        any = true;
+    }
+    return any;
 }
 
 std::string PercentDecode(const std::string& in) {
@@ -282,21 +391,15 @@ extern "C" const char* port_ios_handle_open_url(const char* url, int app_running
     fs::path docs = fs::path(home) / "Documents";
     std::error_code ec;
     fs::create_directories(docs, ec);
-    std::ofstream out(docs / "netplay.cfg", std::ios::trunc);
-    out << "# Written by an invite link. Delete this file (or its lines) to play offline.\n"
-        << "SSB64_NETPLAY=1\n"
-        << "SSB64_NETPLAY_BOOTSTRAP=1\n"
-        << "SSB64_NETPLAY_LOBBY=1\n"
-        << (host ? "SSB64_NETPLAY_HOST=1\n" : "")
-        << "SSB64_NETPLAY_SERVER=" << server << "\n"
-        << "SSB64_NETPLAY_ROOM=" << room << "\n";
-    if (!password.empty()) {
-        out << "SSB64_NETPLAY_PASSWORD=" << password << "\n";
-    }
-    out << "SSB64_NETPLAY_ROLLBACK=1\n"
-        << "SSB64_NETPLAY_DELAY=2\n";
-    out.close();
-    port_log("ios: invite saved for room %s via %s\n", room.c_str(), server.c_str());
+    PortIosMenuState st;
+    LoadOnlineState(docs, &st);
+    std::snprintf(st.server, sizeof(st.server), "%s", server.c_str());
+    std::snprintf(st.password, sizeof(st.password), "%s", password.c_str());
+    std::snprintf(st.room, sizeof(st.room), "%s", room.c_str());
+    st.last_was_host = host ? 1 : 0;
+    SaveOnlineState(docs, st);
+    std::ofstream(docs / "online-pending.cfg", std::ios::trunc) << "MODE=" << (host ? "host" : "join") << "\n";
+    port_log("ios: invite saved for room %s via %s (%s)\n", room.c_str(), server.c_str(), host ? "host" : "join");
     message = host ? "This iPhone will host room " + room +
                          ". Close BattleShip (swipe it away) and open it again, then set up a VS match: "
                          "Player 2 (set to CPU) is your online opponent."
@@ -323,7 +426,9 @@ extern "C" void port_ios_prepare(void) {
     if (!EnsureGameData(docs)) {
         exit(0);
     }
-    LoadNetplayConfig(docs);
+    if (!LoadNetplayConfig(docs)) {
+        RunStartMenu(docs);
+    }
 
     // Relative loads (BattleShip.o2r, f3d.o2r, assets/...) resolve here.
     chdir(docs.c_str());

@@ -544,9 +544,15 @@ file(GLOB_RECURSE SSB64_SRC_WP      "decomp/src/wp/*.c"      "decomp/src/wp/*.h"
 # dirs, or a plain `cmake --build` after pulling hits an undefined-reference
 # link error against a stale glob.
 file(GLOB_RECURSE SSB64_SRC_PORT CONFIGURE_DEPENDS "port/*.cpp" "port/*.c" "port/*.h" "port/*.mm")
-# Objective-C++ glue (UIKit) is iOS-only.
+# Objective-C++ glue (UIKit) is iOS-only, and written for ARC. The global
+# CMAKE_OBJCXX_FLAGS -fobjc-arc does not reach the Xcode generator's build
+# settings, so enable it per file.
 if (NOT CMAKE_SYSTEM_NAME STREQUAL "iOS")
     list(FILTER SSB64_SRC_PORT EXCLUDE REGEX "\\.mm$")
+else()
+    set(_ssb64_port_mm ${SSB64_SRC_PORT})
+    list(FILTER _ssb64_port_mm INCLUDE REGEX "\\.mm$")
+    set_source_files_properties(${_ssb64_port_mm} PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 endif()
 list(FILTER SSB64_SRC_PORT EXCLUDE REGEX "port/stubs/")
 # RelocFileTable.{us,jp}.cpp both define gRelocFileTable — compile only the
