@@ -51,14 +51,17 @@ extern "C" void port_log(const char* fmt, ...);
     [self.view addSubview:badge];
     self.remoteBadge = badge;
 
+    // Right edge, halfway down: the battle timer is at the top right and the
+    // damage meters along the bottom. The "other player talking" badge sits
+    // just above the button.
     UILayoutGuide* safe = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
-        [b.topAnchor constraintEqualToAnchor:safe.topAnchor constant:8],
+        [b.centerYAnchor constraintEqualToAnchor:safe.centerYAnchor],
         [b.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-8],
         [b.widthAnchor constraintEqualToConstant:52],
         [b.heightAnchor constraintEqualToConstant:52],
-        [badge.centerYAnchor constraintEqualToAnchor:b.centerYAnchor],
-        [badge.trailingAnchor constraintEqualToAnchor:b.leadingAnchor constant:-8],
+        [badge.centerXAnchor constraintEqualToAnchor:b.centerXAnchor],
+        [badge.bottomAnchor constraintEqualToAnchor:b.topAnchor constant:-6],
     ]];
     [self refresh];
     __weak PortVoiceController* w = self;
