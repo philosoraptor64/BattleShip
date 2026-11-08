@@ -8,7 +8,9 @@
  * the game at about one frame per second after coming back. Instead, the
  * main loop now waits here (pumping the run loop, without rendering) until
  * the scene is active again. Online, the other player's game holds for us
- * meanwhile (netpeer). Built with ARC; everything runs on the main thread. */
+ * meanwhile (netpeer: it is told we went away, so it waits up to 10
+ * minutes, and on return Start is pressed once so both games show the
+ * pause menu). Built with ARC; everything runs on the main thread. */
 #import <UIKit/UIKit.h>
 
 #include <SDL.h>
@@ -18,6 +20,7 @@
 extern "C" void port_log(const char* fmt, ...);
 extern "C" void port_watchdog_note_yield(void);
 extern "C" int32_t AudioPlayerBuffered(void);
+extern "C" void syNetPeerSetLocalAway(int is_away);  // decomp sys/netpeer.c
 
 static bool sActive = true;
 static int sFramesSinceResume = -1;  // logs the audio queue for a few seconds after resuming
@@ -54,6 +57,7 @@ extern "C" void port_ios_wait_while_inactive(void) {
     }
     const auto start = std::chrono::steady_clock::now();
     port_log("ios: app inactive, game paused\n");
+    syNetPeerSetLocalAway(1);  // online: the other player waits up to 10 min
     while (!sActive) {
         SDL_PumpEvents();  // runs the main run loop: UIKit's notifications arrive here
         if (!sActive) {
@@ -65,4 +69,5 @@ extern "C" void port_ios_wait_while_inactive(void) {
     port_log("ios: app active again after %lld ms, game resumed (audio queued=%d frames)\n", (long long)ms.count(),
              (int)AudioPlayerBuffered());
     sFramesSinceResume = 0;
+    syNetPeerSetLocalAway(0);  // online: back into the battle's pause menu
 }
