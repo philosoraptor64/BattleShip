@@ -211,6 +211,7 @@ static const int16_t* applyOutputFilter(const int16_t* input, int sampleCount)
 // other player's voice over silence. Called from the voice pump, which also
 // runs during network waits.
 static std::chrono::steady_clock::time_point sLastAudioPush;  // game frame or voice top-up
+static constexpr int32_t kMaxQueuedFrames = 3200;  // 100 ms at 32 kHz
 
 extern "C" void portAudioVoiceKeepAlive(void)
 {
@@ -286,6 +287,18 @@ extern "C" void portAudioSubmitFrame(const void *buf, int sampleCount)
 
     wavAppend(pcm, byteLen);
 
-    AudioPlayerPlayFrame(reinterpret_cast<const uint8_t*>(pcm), byteLen);
+    // The game makes audio at a fixed rate, so a backlog never shrinks on its
+    // own: once the output falls behind (on iOS, after switching back to the
+    // app the output starts again late), the sound would lag the picture for
+    // good. Drop blocks while more than ~100 ms is queued (normally ~20-35).
+    static uint32_t sDroppedBlocks = 0;
     sLastAudioPush = std::chrono::steady_clock::now();
+    if (AudioPlayerBuffered() > kMaxQueuedFrames) {
+        if ((sDroppedBlocks++ % 60) == 0) {
+            port_log("SSB64 Audio: output behind (%d frames queued), dropped %u blocks so far\n",
+                     (int)AudioPlayerBuffered(), sDroppedBlocks);
+        }
+        return;
+    }
+    AudioPlayerPlayFrame(reinterpret_cast<const uint8_t*>(pcm), byteLen);
 }

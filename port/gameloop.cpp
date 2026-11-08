@@ -112,6 +112,9 @@ static inline OSMesg port_make_os_mesg_int(uint32_t code)
 /* ========================================================================= */
 
 extern "C" int syNetPeerTakeTimeSyncSkip(void);
+#if defined(BATTLESHIP_IOS)
+extern "C" void port_ios_wait_while_inactive(void);
+#endif
 
 static PortCoroutine *sGameCoroutine = NULL;
 
@@ -700,6 +703,10 @@ void PortPushFrame(void)
 
 	/* Capture the wall-clock start of this PortPushFrame for the
 	 * frame-pacing fallback below. */
+#if defined(BATTLESHIP_IOS)
+	/* Switched away: wait here (no game step, no rendering) until active. */
+	port_ios_wait_while_inactive();
+#endif
 	auto frameStart = std::chrono::steady_clock::now();
 
 	/* Pump SDL events so the window stays responsive and WindowIsRunning
