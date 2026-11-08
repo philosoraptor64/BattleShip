@@ -32,23 +32,24 @@ The first run takes about an hour (tools, a Mac build, and the iPhone project se
 
 1. On the iPhone: Settings > General > **VPN & Device Management** > your Apple ID > **Trust** (first time only).
 2. Open **BattleShip**. When iOS asks to **find devices on local networks**, tap **Allow** (netplay needs it).
-3. To play online, tap the **invite link** a friend sent you. The game saves the room; if it was already open, swipe it away and open it again. It shows "Joining an online match" and waits for the host, who sets up each match (fighters, CPUs, teams, stage) on their phone. After the results it waits for the host's next match.
+3. The game starts with a menu: **Play locally** (the normal game) or **Play online**.
+4. To join a friend: tap their **invite link** once (it saves the server and password, and joins right away; if the game was already open, swipe it away and open it again). Later you can also choose **Play online > Join a match** and type the 4-character room code. The game shows "Joining an online match" and waits while the host sets up each match (fighters, CPUs, teams, stage). After the results it waits for the host's next match.
 
 ## Hosting a match
 
-1. Open your **host link** (the invite link ending in `&h=1`) on your own iPhone once, then reopen BattleShip. It starts in the VS menu.
+1. Choose **Play online > Host a match**. Your room code is shown: tap **Share invite link** to send it to your friend (Messages works), then **Set up the match**. The game starts in the VS menu. (The first time, the server and password come from a host invite link, or enter them under **Online settings**.)
 2. Set up the match as usual. **Player 2 is your online opponent:** set it to **CPU** (any level) and pick their fighter; it becomes human when they join. Add CPUs as players 3 and 4, turn on teams, choose rules and items as you like.
 3. Pick the stage. Instead of starting, the room opens ("Room ABCD is open"). The match starts as soon as your friend joins. If nobody joins within 5 minutes, you play it offline against the CPU.
 4. After each match you're back at character select for the next one.
 
-To play offline again, delete `netplay.cfg` in Files > On My iPhone > BattleShip.
+To play offline, choose **Play locally** at the start.
 
 ## Good to know
 
 - With a free Apple ID the app **stops opening after 7 days**. Run `ios/build-and-install.sh` again to renew it (your settings and saves are kept).
 - Free Apple IDs can have at most 3 sideloaded apps on a phone.
 - Update to the latest version with `git pull --recurse-submodules` before running the script.
-- To play offline again, delete `netplay.cfg` in Files > On My iPhone > BattleShip.
+- To play offline, choose **Play locally** at the start.
 - `CLEAN=1 ios/build-and-install.sh` builds an app without any game data; it then asks for the ROM on the phone (copy it to Files > On My iPhone > BattleShip). That variant is the one that may be given to other people.
 
 ## If something goes wrong
