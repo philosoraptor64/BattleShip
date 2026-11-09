@@ -338,3 +338,15 @@ void portRelocJournalForgetBefore(size_t mark)
 }
 
 } /* extern "C" */
+
+/* Re-entry (the game stopped inside a launcher, to be started again later):
+ * free the token table and its undo journal. */
+extern "C" void portRelocTableReleaseForReentry(void)
+{
+    free(sSlots);
+    sSlots = nullptr;
+    sCapacity = 0;
+    sNextIndex = 1;
+    std::vector<JournalEntry>().swap(sJournal);
+    sJournalBase = 0;
+}

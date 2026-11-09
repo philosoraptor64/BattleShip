@@ -15,7 +15,8 @@ static FILE *sLogFile = NULL;
 void port_log_init(const char *path)
 {
 	if (sLogFile != NULL) return;
-	sLogFile = fopen(path, "w");
+	/* Re-entry (port/reentry.cpp): later runs in the same process append. */
+	sLogFile = fopen(path, getenv("SSB64_LOG_APPEND") != NULL ? "a" : "w");
 }
 
 void port_log_close(void)

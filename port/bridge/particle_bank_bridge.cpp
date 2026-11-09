@@ -148,6 +148,12 @@ static std::unordered_map<std::string, std::vector<uint8_t>> &pristineCache() {
     return m;
 }
 
+/* Re-entry: free the pristine particle-bank copies. */
+extern "C" void portParticleBankReleaseForReentry(void)
+{
+    std::unordered_map<std::string, std::vector<uint8_t>>().swap(pristineCache());
+}
+
 struct WorkingEntry {
     uintptr_t scripts_lo;
     std::vector<uint8_t> script_data;

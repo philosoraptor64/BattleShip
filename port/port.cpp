@@ -52,6 +52,7 @@
 #endif
 #include "renderdoc_trigger.h"
 #include "port_log.h"
+#include "reentry.h"
 #include "port_ios.h"
 #include "fighter_registry.h"
 #include "focus.h"
@@ -1344,7 +1345,7 @@ int PortIsRunning(void) {
 
 } // extern "C"
 
-int main(int argc, char* argv[]) {
+static int PortMainOnce(int argc, char* argv[]) {
 	/* iOS: stage bundled data into Documents and load netplay.cfg into the
 	 * environment before anything reads either. No-op elsewhere. */
 	port_ios_prepare();
@@ -1560,4 +1561,47 @@ int main(int argc, char* argv[]) {
 		port_log_close();
 		return 1;
 	}
+}
+
+/* SSB64_SOAK=N: start, run SSB64_SOAK_FRAMES frames (default 600) and shut
+ * down N times in this one process, putting every global back to its
+ * pristine value in between (port/reentry.cpp). The groundwork for running
+ * inside i64, where a game is started and stopped while the app keeps
+ * running. Logs footprint and threads after each cycle to stderr. */
+int main(int argc, char* argv[]) {
+	port_reentry_save_pristine();
+	const char* soakEnv = std::getenv("SSB64_SOAK");
+	const int cycles = (soakEnv != nullptr) ? std::max(1, std::atoi(soakEnv)) : 1;
+	if (cycles > 1) {
+		const char* f = std::getenv("SSB64_SOAK_FRAMES");
+		setenv("SSB64_MAX_FRAMES", (f != nullptr && f[0] != '\0') ? f : "600", 1);
+	}
+	int rc = 0;
+	for (int cycle = 0; cycle < cycles; cycle++) {
+		if (cycle > 0) {
+			port_reentry_release_caches();
+			port_reentry_restore_pristine();
+			setenv("SSB64_LOG_APPEND", "1", 1);
+		}
+		rc = PortMainOnce(argc, argv);
+		unsigned long kb = 0;
+		unsigned int threads = 0;
+		port_reentry_stats(&kb, &threads);
+		std::fprintf(stderr, "SSB64 soak: cycle %d/%d done rc=%d footprint=%lu KB threads=%u (globals %lu KB)\n",
+		             cycle + 1, cycles, rc, kb, threads, port_reentry_saved_bytes() / 1024);
+		if (rc != 0) break;
+	}
+	if (cycles > 1) {
+		/* Function-local statics re-register their destructors on every run
+		 * (their "constructed" flags are reset with the other globals), so
+		 * the exit-time destructors would run several times on the same
+		 * objects. Leave without them (i64 never unloads a module either). */
+		std::fflush(nullptr);
+		if (std::getenv("SSB64_SOAK_HOLD") != nullptr) {  // debug: keep the process for `leaks <pid>`
+			std::fprintf(stderr, "SSB64 soak: holding (pid %d)\n", (int)getpid());
+			for (;;) pause();
+		}
+		_Exit(rc);
+	}
+	return rc;
 }
