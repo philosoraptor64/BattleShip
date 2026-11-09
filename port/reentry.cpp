@@ -25,6 +25,8 @@
 #include <mach-o/getsect.h>
 #include <mach-o/ldsyms.h>
 #include <mach/mach.h>
+#include <malloc/malloc.h>
+#include <cstdio>
 #endif
 
 #define KEEP __attribute__((section("__DATA,__ssb64keep")))
@@ -64,10 +66,14 @@ void Add(const char *segment, const char *section) {
 
 } // namespace
 
+static void SealPreMainBlocks(void);
+static void RestorePreMainBlocks(void);
+
 extern "C" void port_reentry_save_pristine(void) {
     if (sSectionCount != 0) {
         return;  // only the first, pristine state
     }
+    SealPreMainBlocks();
     Add("__DATA", "__data");
     Add("__DATA", "__bss");
     Add("__DATA", "__common");
@@ -92,6 +98,7 @@ extern "C" void port_reentry_restore_pristine(void) {
     for (int i = 0; i < sSectionCount; i++) {
         std::memcpy(sSections[i].base, sSections[i].copy, sSections[i].size);
     }
+    RestorePreMainBlocks();
 }
 
 extern "C" unsigned long port_reentry_saved_bytes(void) {
@@ -117,4 +124,108 @@ extern "C" void port_reentry_stats(unsigned long *footprint_kb, unsigned int *th
         vm_deallocate(mach_task_self(), reinterpret_cast<vm_address_t>(list), n * sizeof(thread_act_t));
     }
 #endif
+}
+
+/* ---------------------------------------------------------------------
+ * C++ heap blocks made before main().
+ *
+ * Global C++ objects allocate during static initialisation (1047 blocks,
+ * ~55 KB in Smash). The pristine copy of the globals points at them; if a
+ * run frees one and the memory gets reused, the next run's restored
+ * globals would point at someone else's data. So: record every operator
+ * new before main, copy those blocks' contents with the globals, never
+ * free them afterwards, and copy their contents back on each reset.
+ * (Mario Kart does the same in its own operator new; in i64 this belongs
+ * in the app's operator new.)
+ * ------------------------------------------------------------------- */
+#include <algorithm>
+#include <new>
+
+namespace {
+struct PreMainBlock {
+    void *ptr;
+    size_t size;
+    uint8_t *copy;
+};
+constexpr int kMaxPreMain = 8192;
+KEEP PreMainBlock sPreMain[kMaxPreMain] = {};
+KEEP int sPreMainCount = 0;
+KEEP bool sPreMainSealed = false;  // pristine copy taken: the set is final, sorted
+
+bool IsPreMain(void *p) {
+    if (!sPreMainSealed || p == nullptr) {
+        return false;
+    }
+    int lo = 0, hi = sPreMainCount - 1;
+    while (lo <= hi) {
+        const int mid = (lo + hi) / 2;
+        if (sPreMain[mid].ptr == p) return true;
+        if (sPreMain[mid].ptr < p) lo = mid + 1;
+        else hi = mid - 1;
+    }
+    return false;
+}
+
+void *Allocate(size_t n) {
+    void *p = std::malloc(n ? n : 1);
+    if (p == nullptr) {
+        throw std::bad_alloc();
+    }
+    if (!sPreMainSealed && sPreMainCount < kMaxPreMain) {
+        sPreMain[sPreMainCount++] = {p, n, nullptr};
+    }
+    return p;
+}
+
+void Release(void *p) {
+    if (p == nullptr) {
+        return;
+    }
+    if (!sPreMainSealed) {
+        for (int i = sPreMainCount - 1; i >= 0; i--) {  // freed before main: forget it
+            if (sPreMain[i].ptr == p) {
+                sPreMain[i] = sPreMain[--sPreMainCount];
+                break;
+            }
+        }
+    } else if (IsPreMain(p)) {
+        return;  // kept for the next run's restored globals
+    }
+    std::free(p);
+}
+} // namespace
+
+void *operator new(std::size_t n) { return Allocate(n); }
+void *operator new[](std::size_t n) { return Allocate(n); }
+void *operator new(std::size_t n, const std::nothrow_t &) noexcept {
+    try { return Allocate(n); } catch (...) { return nullptr; }
+}
+void *operator new[](std::size_t n, const std::nothrow_t &) noexcept {
+    try { return Allocate(n); } catch (...) { return nullptr; }
+}
+void operator delete(void *p) noexcept { Release(p); }
+void operator delete[](void *p) noexcept { Release(p); }
+void operator delete(void *p, std::size_t) noexcept { Release(p); }
+void operator delete[](void *p, std::size_t) noexcept { Release(p); }
+void operator delete(void *p, const std::nothrow_t &) noexcept { Release(p); }
+void operator delete[](void *p, const std::nothrow_t &) noexcept { Release(p); }
+
+static void SealPreMainBlocks(void) {
+    if (sPreMainSealed) return;
+    std::sort(sPreMain, sPreMain + sPreMainCount,
+              [](const PreMainBlock &a, const PreMainBlock &b) { return a.ptr < b.ptr; });
+    size_t bytes = 0;
+    for (int i = 0; i < sPreMainCount; i++) {
+        sPreMain[i].copy = static_cast<uint8_t *>(std::malloc(sPreMain[i].size ? sPreMain[i].size : 1));
+        std::memcpy(sPreMain[i].copy, sPreMain[i].ptr, sPreMain[i].size);
+        bytes += sPreMain[i].size;
+    }
+    sPreMainSealed = true;
+    std::fprintf(stderr, "SSB64 reentry: kept %d C++ blocks (%zu KB) made before main\n", sPreMainCount, bytes / 1024);
+}
+
+static void RestorePreMainBlocks(void) {
+    for (int i = 0; i < sPreMainCount; i++) {
+        std::memcpy(sPreMain[i].ptr, sPreMain[i].copy, sPreMain[i].size);
+    }
 }
