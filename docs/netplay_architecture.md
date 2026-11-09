@@ -200,6 +200,7 @@ Current debug environment variables:
 - `SSB64_NETPLAY_BIND` is the local IPv4 bind address in `host:port` form.
 - `SSB64_NETPLAY_PEER` is the remote IPv4 address in `host:port` form.
 - `SSB64_NETPLAY_DELAY` offsets sent input ticks by a fixed frame delay. It defaults to 2.
+- Rollback is the default on Apple builds (macOS, iOS), where whole-simulation snapshots work (`port/rollback`): remote input is predicted and mispredicted frames are resimulated. `SSB64_NETPLAY_ROLLBACK=0` forces lockstep (also needed for `SSB64_ROLLBACK_SYNCTEST`). Other platforms always use lockstep; a lockstep peer can play a rollback peer.
 - `SSB64_NETPLAY_SESSION` optionally overrides the packet session id. It defaults to 1.
 - `SSB64_NETPLAY_BOOTSTRAP=1` enables automatic VS match bootstrap.
 - `SSB64_NETPLAY_HOST=1` marks the peer that creates and sends match metadata.
