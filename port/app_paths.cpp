@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include "app_paths.h"
 
 #include <libultraship/libultraship.h>
@@ -51,6 +52,15 @@ std::string LocateExistingFile(const std::string& rel_path) {
         return usb.lexically_normal().string();
     }
 #endif
+    // Inside i64 (port/i64_module.cpp): the module's own read-only files
+    // (f3d.o2r, fonts, controller database) live in its bundle folder.
+    if (const char* bundle = std::getenv("SSB64_BUNDLE_DIR"); bundle != nullptr && bundle[0] != '\0') {
+        ec.clear();
+        fs::path pb = fs::path(bundle) / rel_path;
+        if (fs::exists(pb, ec)) {
+            return pb.lexically_normal().string();
+        }
+    }
     ec.clear();
     fs::path p2 = fs::path(RealAppBundlePath()) / rel_path;
     if (fs::exists(p2, ec)) {

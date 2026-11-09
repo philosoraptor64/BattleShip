@@ -105,6 +105,24 @@ int main(int argc, char **argv) {
         std::fprintf(stderr, "usage: %s <module.dylib> <data_dir> [runs] [frames_per_run]\n", argv[0]);
         return 2;
     }
+    if (std::strcmp(argv[1], "--import") == 0) {  // i64host --import <dylib> <data_dir> <bundle_dir> <rom>
+        if (argc < 6) return 2;
+        void *m = dlopen(argv[2], RTLD_NOW | RTLD_LOCAL);
+        if (m == nullptr) { std::fprintf(stderr, "dlopen: %s\n", dlerror()); return 1; }
+        auto import = reinterpret_cast<int (*)(const n64_host *, const char *, void (*)(float, void *), void *, char *,
+                                               size_t)>(dlsym(m, "n64_game_import_rom"));
+        n64_host h{};
+        h.abi_version = N64_GAME_ABI_VERSION;
+        h.data_dir = argv[3];
+        h.bundle_dir = argv[4];
+        h.log = HostLog;
+        char err[256] = "";
+        const uint32_t t0 = SDL_GetTicks();
+        const int rc = import(&h, argv[5], [](float p, void *) { std::fprintf(stderr, "i64host: import %.0f%%\n", p * 100); },
+                              nullptr, err, sizeof err);
+        std::fprintf(stderr, "i64host: import rc=%d %s (%.1f s)\n", rc, err, (SDL_GetTicks() - t0) / 1000.0);
+        _Exit(rc);
+    }
     const int runs = argc > 3 ? std::atoi(argv[3]) : 3;
     const int framesPerRun = argc > 4 ? std::atoi(argv[4]) : 600;
 
@@ -140,7 +158,7 @@ int main(int argc, char **argv) {
     n64_host host{};
     host.abi_version = N64_GAME_ABI_VERSION;
     host.data_dir = argv[2];
-    host.bundle_dir = argv[2];
+    host.bundle_dir = std::getenv("I64HOST_BUNDLE") ? std::getenv("I64HOST_BUNDLE") : argv[2];
     host.window = win;
     host.audio_write = AudioWrite;
     host.audio_buffered = AudioBuffered;

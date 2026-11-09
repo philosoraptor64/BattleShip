@@ -14,7 +14,7 @@
 // must be loadable BEFORE SDLActivity is set up, otherwise SDL2's
 // JNI_OnLoad would trip over the missing SDLActivity Java class.
 
-#if defined(__ANDROID__) || defined(BATTLESHIP_IOS)
+#if defined(__ANDROID__) || defined(BATTLESHIP_IOS) || defined(SSB64_I64_MODULE)
 
 #include "Companion.h"
 

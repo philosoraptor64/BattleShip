@@ -373,8 +373,10 @@ ExtractionResult ExtractAssetsIfNeeded(const std::string& target_o2r_path, bool 
     const fs::path targetPath = ec ? fs::path(target_o2r_path) : absoluteTargetPath;
     bool staleRecipe = false;
     if (fs::exists(targetPath)) {
-#if defined(__ANDROID__) || defined(BATTLESHIP_IOS)
-        /* Android extraction goes through the Java RomImporter flow (which
+#if defined(__ANDROID__) || defined(BATTLESHIP_IOS) || defined(SSB64_I64_MODULE)
+        /* Inside i64 the launcher imports the ROM (n64_game_import_rom),
+         * so never extract here.
+         * Android extraction goes through the Java RomImporter flow (which
          * has its own asset sentinel) and the staged ROM is deleted after
          * extraction, so a recipe re-extract could never succeed here.
          * iOS ships the o2r prebuilt in the app bundle (no on-device Torch). */

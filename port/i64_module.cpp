@@ -27,6 +27,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <vector>
 
 extern "C" {
 int PortStartupForModule(int argc, char* argv[]);
@@ -80,15 +84,90 @@ extern "C" N64_GAME_EXPORT const n64_game_info* n64_game_get_info(void) {
     return &kInfo;
 }
 
+/* ROM import: Torch extracts BattleShip.o2r from the player's own ROM into
+ * host->data_dir, using the recipes (config.yml + yamls/) shipped with the
+ * module in host->bundle_dir (TorchRecipe/ if present). Any byte order is
+ * accepted: .n64/.v64 dumps are converted to big-endian (.z64) first. */
+extern "C" int torch_extract_o2r(const char* rom_path, const char* src_dir, const char* dst_dir);
+
 extern "C" N64_GAME_EXPORT int n64_game_import_rom(const n64_host* host, const char* rom_path,
                                                    void (*progress)(float, void*), void* user, char* err,
                                                    size_t err_size) {
-    (void)host;
-    (void)rom_path;
-    (void)progress;
-    (void)user;
-    std::snprintf(err, err_size, "ROM import inside i64 isn't built yet");
-    return 1;
+    namespace fs = std::filesystem;
+    if (host == nullptr || rom_path == nullptr || host->data_dir == nullptr || host->bundle_dir == nullptr) {
+        std::snprintf(err, err_size, "missing folders");
+        return 1;
+    }
+    if (sRunning) {
+        std::snprintf(err, err_size, "the game is running");
+        return 1;
+    }
+    if (progress != nullptr) progress(0.0f, user);
+    std::error_code ec;
+    const fs::path data(host->data_dir);
+    fs::create_directories(data, ec);
+    fs::path recipes = fs::path(host->bundle_dir) / "TorchRecipe";
+    if (!fs::exists(recipes / "config.yml", ec)) {
+        recipes = fs::path(host->bundle_dir);
+    }
+    if (!fs::exists(recipes / "config.yml", ec)) {
+        std::snprintf(err, err_size, "the game's extraction recipes are missing from the module");
+        return 1;
+    }
+
+    /* Byte order: big-endian dumps start 80 37 12 40. */
+    std::vector<uint8_t> rom;
+    {
+        std::ifstream in(rom_path, std::ios::binary);
+        rom.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    if (rom.size() < (8u << 20) || rom.size() > (64u << 20) || (rom.size() % 4) != 0) {
+        std::snprintf(err, err_size, "that file isn't an N64 ROM");
+        return 1;
+    }
+    fs::path source(rom_path);
+    const fs::path temp = data / ".import.z64";
+    if (!(rom[0] == 0x80 && rom[1] == 0x37 && rom[2] == 0x12 && rom[3] == 0x40)) {
+        if (rom[0] == 0x37 && rom[1] == 0x80) {  // .v64: 16-bit byteswapped
+            for (size_t i = 0; i + 1 < rom.size(); i += 2) std::swap(rom[i], rom[i + 1]);
+        } else if (rom[0] == 0x40 && rom[1] == 0x12) {  // .n64: 32-bit little-endian
+            for (size_t i = 0; i + 3 < rom.size(); i += 4) {
+                std::swap(rom[i], rom[i + 3]);
+                std::swap(rom[i + 1], rom[i + 2]);
+            }
+        } else {
+            std::snprintf(err, err_size, "that file isn't an N64 ROM");
+            return 1;
+        }
+        std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+        out.write(reinterpret_cast<const char*>(rom.data()), (std::streamsize)rom.size());
+        if (!out) {
+            std::snprintf(err, err_size, "not enough space to import the ROM");
+            return 1;
+        }
+        source = temp;
+    }
+    rom.clear();
+    rom.shrink_to_fit();
+
+    const fs::path o2r = data / "BattleShip.o2r";
+    fs::remove(o2r, ec);
+    const int rc = torch_extract_o2r(source.c_str(), recipes.c_str(), data.c_str());
+    fs::remove(temp, ec);
+    if (rc != 0 || !fs::exists(o2r, ec)) {
+        fs::remove(o2r, ec);  // never keep a partial archive
+        std::snprintf(err, err_size,
+                      rc == 3 ? "this isn't Super Smash Bros. (USA) v1.0" : "extracting the game data failed (%d)", rc);
+        return 1;
+    }
+    /* The recipe stamp the game checks at start (first_run.cpp): the archive
+     * matches this build's extraction pipeline. */
+    {
+        std::ofstream stamp(o2r.string() + ".recipe", std::ios::trunc);
+        stamp << SSB64_ASSET_RECIPE_HASH << "\n";
+    }
+    if (progress != nullptr) progress(1.0f, user);
+    return 0;
 }
 
 extern "C" N64_GAME_EXPORT uint32_t n64_game_session_blob(const n64_host* host, void* out, uint32_t cap) {
@@ -114,6 +193,22 @@ extern "C" N64_GAME_EXPORT int n64_game_start(const n64_host* host, const n64_la
         std::snprintf(err, err_size, "online needs i64's game channel and 2 players");
         return 1;
     }
+    /* Game data: imported from the player's ROM by n64_game_import_rom, for
+     * this build's extraction recipe. */
+    if (host->data_dir != nullptr && host->data_dir[0] != '\0') {
+        const std::string o2r = std::string(host->data_dir) + "/BattleShip.o2r";
+        std::ifstream stamp(o2r + ".recipe");
+        std::string have;
+        std::getline(stamp, have);
+        if (!std::filesystem::exists(o2r)) {
+            std::snprintf(err, err_size, "import your Super Smash Bros. ROM first");
+            return 1;
+        }
+        if (have != SSB64_ASSET_RECIPE_HASH) {
+            std::snprintf(err, err_size, "the game data is from another version: import the ROM again");
+            return 1;
+        }
+    }
     /* First start: everything the module has done so far is static
      * initialisation, i.e. the pristine state to come back to after a run. */
     port_reentry_save_pristine();
@@ -124,6 +219,9 @@ extern "C" N64_GAME_EXPORT int n64_game_start(const n64_host* host, const n64_la
         SetEnv("SHIP_HOME", host->data_dir);  // config, saves, BattleShip.o2r
         std::snprintf(sLogPath, sizeof sLogPath, "%s/ssb64.log", host->data_dir);
         SetEnv("SSB64_LOG_PATH", sLogPath);
+    }
+    if (host->bundle_dir != nullptr && host->bundle_dir[0] != '\0') {
+        SetEnv("SSB64_BUNDLE_DIR", host->bundle_dir);  // f3d.o2r, fonts, gamecontrollerdb.txt
     }
     if (sRendererWindow != host->window) {
         sRenderer = nullptr;  // a different window: LUS creates a new renderer

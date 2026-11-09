@@ -298,6 +298,13 @@ else()
         set(TORCH_SIDECAR_NAME torch)
     endif()
 endif()
+if (SSB64_I64_MODULE AND NOT CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
+    # The i64 module extracts BattleShip.o2r from the player's own ROM inside
+    # i64 (port/i64_module.cpp -> torch_extract_o2r), so link Torch as a
+    # library too; the executable above still does the build-time extraction.
+    set(USE_STANDALONE OFF CACHE BOOL "" FORCE)
+    add_subdirectory(torch ${CMAKE_BINARY_DIR}/torch-lib)
+endif()
 
 # Reloc YAML category files (same category set for every version; the
 # per-version ROM offsets differ inside them). yamls/${SSB64_VERSION}/ is
@@ -986,6 +993,8 @@ elseif(SSB64_I64_MODULE)
     target_link_options(${PROJECT_NAME} PRIVATE
         "-Wl,-exported_symbols_list,${CMAKE_SOURCE_DIR}/port/i64/exports.txt")
     set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "ssb64_i64")
+    # ROM import inside i64 (n64_game_import_rom): Torch as a library.
+    target_link_libraries(${PROJECT_NAME} PRIVATE torch)
 else()
     add_executable(${PROJECT_NAME} ${SSB64_SRC_PORT} ${SSB64_DEBUG_TOOLS} $<TARGET_OBJECTS:ssb64_game>)
 
