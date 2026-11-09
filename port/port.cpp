@@ -11,6 +11,7 @@
 #include <libultraship/libultraship.h>
 #include <SDL2/SDL.h>
 #include <libultraship/controller/controldeck/ControlDeck.h>
+#include <libultraship/controller/controldevice/controller/mapping/ControllerDefaultMappings.h>
 #include <fast/Fast3dWindow.h>
 #include <ship/resource/File.h>
 #include <chrono>
@@ -621,6 +622,61 @@ extern "C" {
 
 static int PortInitImpl(int argc, char* argv[]);
 
+// N64 button names for the control deck (same as LUS::ControlDeck's default).
+static std::unordered_map<CONTROLLERBUTTONS_T, std::string> PortN64ButtonNames() {
+	return { { BTN_A, "A" },         { BTN_B, "B" },           { BTN_L, "L" },         { BTN_R, "R" },
+	         { BTN_Z, "Z" },         { BTN_START, "Start" },   { BTN_CLEFT, "CLeft" }, { BTN_CRIGHT, "CRight" },
+	         { BTN_CUP, "CUp" },     { BTN_CDOWN, "CDown" },   { BTN_DLEFT, "DLeft" }, { BTN_DRIGHT, "DRight" },
+	         { BTN_DUP, "DUp" },     { BTN_DDOWN, "DDown" } };
+}
+
+// Once per install: a saved mapping that still has N64 B on the old
+// default (the gamepad's right face button, SDL B) moves to the left face
+// button (SDL X), like new controllers get. Works on the saved settings,
+// before the control deck loads them (that happens when the game first
+// initialises its controllers). Left alone when the left button is already
+// used on that port (the player changed the layout).
+static void PortMigrateBButtonToLeft() {
+	auto cvars = sContext->GetConsoleVariables();
+	const char* flag = "gControllers.BOnLeftFaceButtonV2";
+	if (cvars->GetInteger(flag, 0) != 0) {
+		return;
+	}
+	const auto names = PortN64ButtonNames();
+	for (int port = 1; port <= 4; port++) {
+		auto idsKey = [port](CONTROLLERBUTTONS_T bitmask) {
+			return "gControllers.Port" + std::to_string(port) + ".Buttons." + std::to_string(bitmask) +
+			       "ButtonMappingIds";
+		};
+		const std::string prefix = "P" + std::to_string(port - 1) + "-B" + std::to_string(BTN_B) + "-SDLB";
+		const std::string oldId = prefix + std::to_string(SDL_CONTROLLER_BUTTON_B);
+		const std::string newId = prefix + std::to_string(SDL_CONTROLLER_BUTTON_X);
+		std::string ids = cvars->GetString(idsKey(BTN_B).c_str(), "");
+		const size_t at = ids.find(oldId + ",");
+		if (at == std::string::npos) continue;
+		bool leftUsed = false;
+		const std::string leftTag = "-SDLB" + std::to_string(SDL_CONTROLLER_BUTTON_X) + ",";
+		for (const auto& [bitmask, name] : names) {
+			if (std::string(cvars->GetString(idsKey(bitmask).c_str(), "")).find(leftTag) != std::string::npos) {
+				leftUsed = true;
+			}
+		}
+		if (leftUsed) continue;
+		ids.replace(at, oldId.size(), newId);
+		cvars->SetString(idsKey(BTN_B).c_str(), ids.c_str());
+		const std::string oldKey = "gControllers.ButtonMappings." + oldId, newKey = "gControllers.ButtonMappings." + newId;
+		cvars->SetString((newKey + ".ButtonMappingClass").c_str(), "SDLButtonToButtonMapping");
+		cvars->SetInteger((newKey + ".Bitmask").c_str(), BTN_B);
+		cvars->SetInteger((newKey + ".SDLControllerButton").c_str(), SDL_CONTROLLER_BUTTON_X);
+		cvars->ClearVariable((oldKey + ".ButtonMappingClass").c_str());
+		cvars->ClearVariable((oldKey + ".Bitmask").c_str());
+		cvars->ClearVariable((oldKey + ".SDLControllerButton").c_str());
+		port_log("SSB64: controller port %d: N64 B moved to the left face button\n", port);
+	}
+	cvars->SetInteger(flag, 1);
+	cvars->Save();
+}
+
 int PortInit(int argc, char* argv[]) {
 	// Top-level catch so unhandled C++ exceptions during init land in
 	// ssb64.log with their type and what() instead of bubbling up as an
@@ -881,7 +937,33 @@ static int PortInitImpl(int argc, char* argv[]) {
 	// outlive sContext and their destructors run after spdlog::shutdown,
 	// crashing in SPDLOG_DEBUG calls inside libultraship destructors.
 	{
-		auto controlDeck = std::make_shared<LUS::ControlDeck>();
+		// Face buttons by POSITION, not by printed label, so the same
+		// physical buttons are used on Xbox, PlayStation and Nintendo-style
+		// pads (SDL: A = bottom, B = right, X = left, Y = top).
+		SDL_SetHint(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS, "0");
+		// N64 layout: A on the bottom button, B on the left one (on the
+		// N64, B sits up and to the left of A). Upstream LUS uses the right
+		// button for B. Empty maps keep LUS's other defaults.
+		auto defaults = std::make_shared<LUS::ControllerDefaultMappings>(
+			std::unordered_map<CONTROLLERBUTTONS_T, std::unordered_set<Ship::KbScancode>>(),
+			std::unordered_map<Ship::StickIndex, std::vector<std::pair<Ship::Direction, Ship::KbScancode>>>(),
+			std::unordered_map<CONTROLLERBUTTONS_T, std::unordered_set<SDL_GameControllerButton>>({
+				{ BTN_A, { SDL_CONTROLLER_BUTTON_A } },
+				{ BTN_B, { SDL_CONTROLLER_BUTTON_X } },
+				{ BTN_L, { SDL_CONTROLLER_BUTTON_LEFTSHOULDER } },
+				{ BTN_START, { SDL_CONTROLLER_BUTTON_START } },
+				{ BTN_DUP, { SDL_CONTROLLER_BUTTON_DPAD_UP } },
+				{ BTN_DDOWN, { SDL_CONTROLLER_BUTTON_DPAD_DOWN } },
+				{ BTN_DLEFT, { SDL_CONTROLLER_BUTTON_DPAD_LEFT } },
+				{ BTN_DRIGHT, { SDL_CONTROLLER_BUTTON_DPAD_RIGHT } },
+			}),
+			std::unordered_map<Ship::StickIndex, std::vector<std::pair<Ship::Direction, SDL_GameControllerButton>>>(),
+			std::unordered_map<CONTROLLERBUTTONS_T, std::vector<std::pair<SDL_GameControllerAxis, int32_t>>>(),
+			std::unordered_map<Ship::StickIndex,
+			                   std::vector<std::pair<Ship::Direction, std::pair<SDL_GameControllerAxis, int32_t>>>>());
+		PortMigrateBButtonToLeft();  // saved settings are loaded by now; the deck reads them later
+		auto controlDeck = std::make_shared<LUS::ControlDeck>(std::vector<CONTROLLERBUTTONS_T>(), defaults,
+		                                                       PortN64ButtonNames());
 		if (!sContext->InitControlDeck(controlDeck)) { port_log("SSB64: InitControlDeck failed\n"); return 1; }
 	}
 	port_log("SSB64: ControlDeck OK\n");
