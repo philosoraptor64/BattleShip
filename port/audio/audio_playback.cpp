@@ -26,6 +26,22 @@
 #include <chrono>
 #include <cmath>
 
+// While iOS voice chat runs, the game's audio goes through n64net's
+// echo-cancelling unit instead of libultraship's player (see n64net_voice.h).
+static int32_t outBuffered(void)
+{
+    return n64net_voice_output_active() ? n64net_voice_output_buffered(32000) : AudioPlayerBuffered();
+}
+
+static void outPlay(const int16_t *stereo, int32_t frames)
+{
+    if (n64net_voice_output_active()) {
+        n64net_voice_output_write(stereo, frames, 32000);
+    } else {
+        AudioPlayerPlayFrame(reinterpret_cast<const uint8_t *>(stereo), (size_t)frames * 4);
+    }
+}
+
 // SSB64 original output rate is 32 kHz.
 // At 60 fps that's ~533 samples/frame. We use the same high/low watermarks
 // as Starship to keep the audio player's ring buffer comfortably filled.
@@ -55,7 +71,7 @@ extern "C" void portAudioPushSilence(void)
     // Determine how many samples to submit this frame.
     // Mirror the Starship approach: if the player is under-buffered, send the
     // high watermark; otherwise send the low watermark.
-    int32_t buffered = AudioPlayerBuffered();
+    int32_t buffered = outBuffered();
     int32_t desired  = AudioPlayerGetDesiredBuffered();
 
     int32_t samplesPerFrame;
@@ -74,7 +90,7 @@ extern "C" void portAudioPushSilence(void)
         byteLen = sizeof(sSilenceBuf);
     }
 
-    AudioPlayerPlayFrame(reinterpret_cast<const uint8_t*>(sSilenceBuf), byteLen);
+    outPlay(sSilenceBuf, (int32_t)(byteLen / 4));
 }
 
 /* ---------------------------------------------------------------------- */
@@ -232,7 +248,7 @@ extern "C" void portAudioVoiceKeepAlive(void)
     }
     std::memset(sVoiceOnly, 0, frames * 4);
     n64net_voice_mix(sVoiceOnly, frames, 32000);
-    AudioPlayerPlayFrame(reinterpret_cast<const uint8_t*>(sVoiceOnly), (size_t)frames * 4);
+    outPlay(sVoiceOnly, frames);
     sLastAudioPush = now - std::chrono::milliseconds(idleMs - frames / 32);
 }
 
@@ -293,12 +309,12 @@ extern "C" void portAudioSubmitFrame(const void *buf, int sampleCount)
     // good. Drop blocks while more than ~100 ms is queued (normally ~20-35).
     static uint32_t sDroppedBlocks = 0;
     sLastAudioPush = std::chrono::steady_clock::now();
-    if (AudioPlayerBuffered() > kMaxQueuedFrames) {
+    if (outBuffered() > kMaxQueuedFrames) {
         if ((sDroppedBlocks++ % 60) == 0) {
             port_log("SSB64 Audio: output behind (%d frames queued), dropped %u blocks so far\n",
-                     (int)AudioPlayerBuffered(), sDroppedBlocks);
+                     (int)outBuffered(), sDroppedBlocks);
         }
         return;
     }
-    AudioPlayerPlayFrame(reinterpret_cast<const uint8_t*>(pcm), byteLen);
+    outPlay(pcm, sampleCount);
 }
