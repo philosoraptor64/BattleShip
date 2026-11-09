@@ -53,6 +53,10 @@
 #include "renderdoc_trigger.h"
 #include "port_log.h"
 #include "reentry.h"
+#if defined(__APPLE__)
+extern "C" void* objc_autoreleasePoolPush(void);
+extern "C" void objc_autoreleasePoolPop(void* pool);
+#endif
 #include "port_ios.h"
 #include "fighter_registry.h"
 #include "focus.h"
@@ -1584,6 +1588,19 @@ int main(int argc, char* argv[]) {
 			setenv("SSB64_LOG_APPEND", "1", 1);
 		}
 		rc = PortMainOnce(argc, argv);
+#if defined(__APPLE__) && !defined(BATTLESHIP_IOS)
+		if (cycles > 1) {
+			/* AppKit releases a closed window (and with it SDL's Metal view
+			 * and its IOSurfaces) only on a later run-loop pass, which a game
+			 * loop never gives it between runs. Inside i64 the app's run loop
+			 * does this; here, spin it briefly. */
+			void* pool = objc_autoreleasePoolPush();
+			for (int i = 0; i < 5; i++) {
+				CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.02, false);
+			}
+			objc_autoreleasePoolPop(pool);
+		}
+#endif
 		unsigned long kb = 0;
 		unsigned int threads = 0;
 		port_reentry_stats(&kb, &threads);
