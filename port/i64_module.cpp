@@ -7,8 +7,12 @@
  * shutdown (port.cpp) and resets the module to a clean slate after each run
  * (port/reentry.cpp), so it can be started again without restarting the app.
  *
- * Not yet: online runs (the game channel), session blob, ROM import on the
- * device, title art, pause. Offline runs work. */
+ * Online runs use i64's game channel (host->net_send/net_recv, through
+ * port/net/netplay_transport.cpp): no socket or room server of our own, no
+ * voice (i64 does it). The usual session handshake then runs over that
+ * channel (the host sends its rules, save data and settings; both start on
+ * the same tick).
+ * Not yet: session blob, ROM import on the device, title art, pause. */
 #if defined(SSB64_I64_MODULE)
 
 #define N64_GAME_BUILDING_MODULE 1
@@ -33,6 +37,10 @@ void LUS_SetExternalWindow(void* sdlWindow, void** rendererCache);
 /* Game audio goes to the host (port/audio/audio_playback.cpp). */
 extern void (*gPortHostAudioWrite)(const int16_t* stereo, uint32_t frames, uint32_t rate);
 extern uint32_t (*gPortHostAudioBuffered)(uint32_t rate);
+/* Online: the host's game channel (port/net/netplay_transport.cpp). */
+extern int (*gPortNetHostSend)(const void* data, uint32_t size);
+extern int (*gPortNetHostRecv)(void* buf, uint32_t cap);
+extern uint32_t gPortNetHostMaxDatagram;
 }
 
 namespace {
@@ -101,8 +109,9 @@ extern "C" N64_GAME_EXPORT int n64_game_start(const n64_host* host, const n64_la
         std::snprintf(err, err_size, "i64 and this game module disagree on the interface version");
         return 1;
     }
-    if (launch->mode != N64_LAUNCH_OFFLINE) {
-        std::snprintf(err, err_size, "online play from i64 isn't built yet for this game");
+    if (launch->mode == N64_LAUNCH_ONLINE &&
+        (host->net_send == nullptr || host->net_recv == nullptr || launch->local_player > 1)) {
+        std::snprintf(err, err_size, "online needs i64's game channel and 2 players");
         return 1;
     }
     /* First start: everything the module has done so far is static
@@ -121,6 +130,33 @@ extern "C" N64_GAME_EXPORT int n64_game_start(const n64_host* host, const n64_la
         sRendererWindow = host->window;
     }
     LUS_SetExternalWindow(host->window, &sRenderer);
+
+    /* Netplay settings are read from the environment at start-up: clear any
+     * left from an earlier run, then describe this one. */
+    static const char* const kNetVars[] = {
+        "SSB64_NETPLAY", "SSB64_NETPLAY_MODE", "SSB64_NETPLAY_BOOTSTRAP", "SSB64_NETPLAY_HOST",
+        "SSB64_NETPLAY_LOCAL_PLAYER", "SSB64_NETPLAY_REMOTE_PLAYER", "SSB64_NETPLAY_BIND", "SSB64_NETPLAY_PEER",
+        "SSB64_NETPLAY_SERVER", "SSB64_NETPLAY_ROOM", "SSB64_NETPLAY_PASSWORD", "SSB64_NETPLAY_SEED",
+        "SSB64_NETPLAY_VOICE", "SSB64_NETPLAY_LOBBY", "SSB64_NETPLAY_SESSION",
+    };
+    for (const char* v : kNetVars) unsetenv(v);
+    gPortNetHostSend = nullptr;
+    gPortNetHostRecv = nullptr;
+    if (launch->mode == N64_LAUNCH_ONLINE) {
+        const bool isHost = launch->local_player == 0;
+        SetEnv("SSB64_NETPLAY", "1");
+        SetEnv("SSB64_NETPLAY_MODE", "session");      // the whole game as one console
+        SetEnv("SSB64_NETPLAY_BOOTSTRAP", "1");
+        if (isHost) SetEnv("SSB64_NETPLAY_HOST", "1");
+        SetEnv("SSB64_NETPLAY_LOCAL_PLAYER", isHost ? "0" : "1");
+        SetEnv("SSB64_NETPLAY_REMOTE_PLAYER", isHost ? "1" : "0");
+        SetEnv("SSB64_NETPLAY_BIND", "0.0.0.0:0");     // unused: i64's channel
+        SetEnv("SSB64_NETPLAY_PEER", "0.0.0.0:0");
+        if (launch->seed != 0) SetEnv("SSB64_NETPLAY_SEED", std::to_string(launch->seed));
+        gPortNetHostSend = host->net_send;
+        gPortNetHostRecv = host->net_recv;
+        gPortNetHostMaxDatagram = host->net_max_datagram ? host->net_max_datagram : 1200;
+    }
     gPortHostAudioWrite = host->audio_write;
     gPortHostAudioBuffered = host->audio_buffered;
 
@@ -153,6 +189,8 @@ extern "C" N64_GAME_EXPORT void n64_game_stop(void) {
     PortRunEnd();
     gPortHostAudioWrite = nullptr;
     gPortHostAudioBuffered = nullptr;
+    gPortNetHostSend = nullptr;
+    gPortNetHostRecv = nullptr;
     LUS_SetExternalWindow(nullptr, nullptr);
     port_reentry_release_caches();
     port_reentry_restore_pristine();

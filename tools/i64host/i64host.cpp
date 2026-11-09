@@ -4,6 +4,11 @@
  * times in one process.
  *
  *   i64host <module.dylib> <data_dir> [runs=3] [frames_per_run=600]
+ *           [host|guest <local_udp_port> <peer_udp_port>]
+ *
+ * With host|guest the runs are ONLINE: the game channel is a UDP socket on
+ * 127.0.0.1 to the other i64host (standing in for i64's session), host =
+ * player 1, guest = player 2.
  *
  * Logs each run's result plus the process footprint and thread count, so a
  * module that doesn't return to a clean slate shows up as growth. Offline
@@ -11,7 +16,11 @@
 #include "../../port/i64/n64_game.h"
 
 #include <SDL2/SDL.h>
+#include <arpa/inet.h>
 #include <dlfcn.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #include <unistd.h>
 #include <mach/mach.h>
 
@@ -53,8 +62,15 @@ uint32_t AudioBuffered(uint32_t rate) {
     return static_cast<uint32_t>(frames * rate / sAudioRate);
 }
 
-int NetSend(const void *, uint32_t) { return -1; }
-int NetRecv(void *, uint32_t) { return 0; }
+int sSock = -1;
+sockaddr_in sPeer{};
+int NetSend(const void *data, uint32_t size) {
+    return sendto(sSock, data, size, 0, reinterpret_cast<sockaddr *>(&sPeer), sizeof sPeer) == (ssize_t)size ? 0 : -1;
+}
+int NetRecv(void *buf, uint32_t cap) {
+    const ssize_t n = recvfrom(sSock, buf, cap, 0, nullptr, nullptr);
+    return n > 0 ? (int)n : 0;
+}
 int NetPollEvent(void) { return 0; }
 void VoiceSetMuted(int) {}
 void VoiceSetTalking(int) {}
@@ -144,6 +160,28 @@ int main(int argc, char **argv) {
     n64_launch launch{};
     launch.abi_version = N64_GAME_ABI_VERSION;
     launch.mode = N64_LAUNCH_OFFLINE;
+    if (argc > 7) {
+        const bool isHost = std::strcmp(argv[5], "host") == 0;
+        sSock = socket(AF_INET, SOCK_DGRAM, 0);
+        sockaddr_in me{};
+        me.sin_family = AF_INET;
+        me.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        me.sin_port = htons((uint16_t)std::atoi(argv[6]));
+        if (bind(sSock, reinterpret_cast<sockaddr *>(&me), sizeof me) != 0) {
+            std::perror("bind");
+            return 1;
+        }
+        fcntl(sSock, F_SETFL, fcntl(sSock, F_GETFL, 0) | O_NONBLOCK);
+        sPeer.sin_family = AF_INET;
+        sPeer.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        sPeer.sin_port = htons((uint16_t)std::atoi(argv[7]));
+        launch.mode = N64_LAUNCH_ONLINE;
+        launch.local_player = isHost ? 0 : 1;
+        launch.num_players = 2;
+        launch.seed = 12345;
+        launch.peer_name = isHost ? "guest" : "host";
+        std::fprintf(stderr, "i64host: online as %s, udp %s -> %s\n", isHost ? "host" : "guest", argv[6], argv[7]);
+    }
 
     for (int run = 1; run <= runs; run++) {
         char err[256] = "";
@@ -156,6 +194,7 @@ int main(int argc, char **argv) {
             frames++;
         }
         stop();
+        launch.run++;
         // Between runs the app's run loop goes on (i64's would), letting
         // AppKit and the audio device settle.
         for (int i = 0; i < 10; i++) {
