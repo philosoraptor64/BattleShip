@@ -483,6 +483,12 @@ void WatchdogLoop() {
 } // namespace
 
 extern "C" void port_watchdog_init(void) {
+#if defined(SSB64_I64_MODULE)
+    /* Inside i64 the process (signal handlers, the alternate signal stack,
+     * hang detection) belongs to the host app: a game module that stopped
+     * must not leave its handlers behind for the next game. */
+    return;
+#endif
     bool expected = false;
     if (!sStarted.compare_exchange_strong(expected, true)) return;
 #if !defined(_WIN32)

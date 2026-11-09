@@ -180,8 +180,12 @@ typedef struct n64_launch {
     const void* session_blob;   /* everything the guests adopt from the host for this run, */
     uint32_t session_blob_size; /* opaque to i64 (see n64_game_session_blob) */
     const char* peer_name;      /* the other player's name, for "Waiting for ..." (2 players) */
-    uint32_t flags;             /* none yet */
+    uint32_t flags;             /* N64_LAUNCH_* */
 } n64_launch;
+
+/* i64 drives n64_game_frame() from a display link at target_fps: the module
+ * switches off its own frame pacing (sleeping to its frame schedule). */
+#define N64_LAUNCH_HOST_PACED (1u << 0)
 
 #define N64_GAME_SESSION_BLOB_MAX (64 * 1024)
 

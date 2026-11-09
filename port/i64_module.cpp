@@ -94,6 +94,11 @@ extern "C" N64_GAME_EXPORT int n64_game_import_rom(const n64_host* host, const c
                                                    void (*progress)(float, void*), void* user, char* err,
                                                    size_t err_size) {
     namespace fs = std::filesystem;
+    /* Before Torch runs: everything so far is static initialisation, the
+     * pristine state. Taking it here also closes the list of C++ blocks made
+     * "before main" (reentry.cpp): otherwise Torch's big temporary buffers
+     * land in it, and those libc++ frees behind operator delete's back. */
+    port_reentry_save_pristine();
     if (host == nullptr || rom_path == nullptr || host->data_dir == nullptr || host->bundle_dir == nullptr) {
         std::snprintf(err, err_size, "missing folders");
         return 1;
