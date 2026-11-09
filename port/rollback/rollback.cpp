@@ -29,6 +29,12 @@
 #if SSB64_SNAPSHOT_SUPPORTED
 #include <mach-o/getsect.h>
 #include <mach-o/ldsyms.h>
+// This image's own Mach-O header: the executable's, or the module's when the
+// game is built as a library (i64), where _mh_execute_header is the host's.
+extern "C" void *__dso_handle;
+static inline const struct mach_header_64 *PortThisImage() {
+    return reinterpret_cast<const struct mach_header_64 *>(&__dso_handle);
+}
 #endif
 
 extern "C" {
@@ -92,9 +98,9 @@ bool FindSections() {
 #if SSB64_SNAPSHOT_SUPPORTED
     if (!sSectionsFound) {
         unsigned long size = 0;
-        sData.base = getsectiondata(&_mh_execute_header, SSB64_SNAPSHOT_SEGMENT, "__data", &size);
+        sData.base = getsectiondata(PortThisImage(), SSB64_SNAPSHOT_SEGMENT, "__data", &size);
         sData.size = size;
-        sBss.base = getsectiondata(&_mh_execute_header, SSB64_SNAPSHOT_SEGMENT, "__bss", &size);
+        sBss.base = getsectiondata(PortThisImage(), SSB64_SNAPSHOT_SEGMENT, "__bss", &size);
         sBss.size = size;
         sSectionsFound = (sData.base != nullptr && sBss.base != nullptr);
         if (sSectionsFound) {
@@ -233,7 +239,7 @@ void FullCompare(const char *part, int partId, const std::vector<uint8_t> &a, co
 #if SSB64_SNAPSHOT_SUPPORTED
             if (base != nullptr) {
                 nmAddr = 0x100000000ull + (reinterpret_cast<uintptr_t>(base) + i -
-                                           reinterpret_cast<uintptr_t>(&_mh_execute_header));
+                                           reinterpret_cast<uintptr_t>(PortThisImage()));
             }
 #endif
             char hexA[100] = "", hexB[100] = "";
@@ -469,4 +475,16 @@ extern "C" void port_rollback_frame_end(void) {
                  sRbRollbacks ? (double)sRbResimFrames / sRbRollbacks : 0.0, sRbMaxDepth, sRbTooDeep,
                  sRbRollbacks ? sRbUsecs / sRbRollbacks : 0.0, sRbSaveUsecs / sRbFrames);
     }
+}
+
+/* Re-entry (the game stopped inside a launcher): free the snapshot ring and
+ * the SyncTest copies (~2.4 MB each, 16+ of them after an online run). */
+extern "C" void portRollbackReleaseForReentry(void)
+{
+    for (auto &snap : sRing) {
+        snap = GameSnapshot();
+    }
+    sFullBefore = GameSnapshot();
+    sFullAfter = GameSnapshot();
+    std::vector<uint64_t>().swap(sFullSeen);
 }

@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.24.0 FATAL_ERROR)
 
 project(ssb64 LANGUAGES C CXX)
+option(SSB64_I64_MODULE "Build the game as an i64 module (shared library, n64_game.h)" OFF)
 
 option(BATTLESHIP_UWP "Build the native DLL used by the Xbox/UWP wrapper" OFF)
 
@@ -975,6 +976,16 @@ elseif(BATTLESHIP_UWP)
         OUTPUT_NAME "BattleShip"
         WINDOWS_EXPORT_ALL_SYMBOLS TRUE
     )
+elseif(SSB64_I64_MODULE)
+    # The game as an i64 module: a shared library exporting only the
+    # n64_game_* functions (port/i64_module.cpp, port/i64/n64_game.h). Every
+    # other symbol (decomp, libultraship, ImGui...) stays private, so two
+    # games' identical names never meet inside i64.
+    add_library(${PROJECT_NAME} SHARED ${SSB64_SRC_PORT} ${SSB64_DEBUG_TOOLS} $<TARGET_OBJECTS:ssb64_game>)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE SSB64_I64_MODULE=1)
+    target_link_options(${PROJECT_NAME} PRIVATE
+        "-Wl,-exported_symbols_list,${CMAKE_SOURCE_DIR}/port/i64/exports.txt")
+    set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "ssb64_i64")
 else()
     add_executable(${PROJECT_NAME} ${SSB64_SRC_PORT} ${SSB64_DEBUG_TOOLS} $<TARGET_OBJECTS:ssb64_game>)
 

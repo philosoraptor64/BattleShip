@@ -26,16 +26,28 @@
 #include <chrono>
 #include <cmath>
 
-// While iOS voice chat runs, the game's audio goes through n64net's
-// echo-cancelling unit instead of libultraship's player (see n64net_voice.h).
+// Inside i64 (port/i64_module.cpp) the host plays the game's audio (mixed
+// with voice, through its echo-cancelling unit). Stand-alone: while iOS
+// voice chat runs, the game's audio goes through n64net's echo-cancelling
+// unit instead of libultraship's player (see n64net_voice.h).
+extern "C" {
+void (*gPortHostAudioWrite)(const int16_t* stereo, uint32_t frames, uint32_t rate) = nullptr;
+uint32_t (*gPortHostAudioBuffered)(uint32_t rate) = nullptr;
+}
+
 static int32_t outBuffered(void)
 {
+    if (gPortHostAudioBuffered != nullptr) {
+        return (int32_t)gPortHostAudioBuffered(32000);
+    }
     return n64net_voice_output_active() ? n64net_voice_output_buffered(32000) : AudioPlayerBuffered();
 }
 
 static void outPlay(const int16_t *stereo, int32_t frames)
 {
-    if (n64net_voice_output_active()) {
+    if (gPortHostAudioWrite != nullptr) {
+        gPortHostAudioWrite(stereo, (uint32_t)frames, 32000);
+    } else if (n64net_voice_output_active()) {
         n64net_voice_output_write(stereo, frames, 32000);
     } else {
         AudioPlayerPlayFrame(reinterpret_cast<const uint8_t *>(stereo), (size_t)frames * 4);

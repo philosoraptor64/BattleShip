@@ -2334,9 +2334,11 @@ struct PortFixupState {
 	std::unordered_set<uintptr_t> chainSlotAddrs;
 };
 
+static std::shared_ptr<const PortFixupState> sLastFixupState;
+
 std::shared_ptr<const PortFixupState> portFixupStateCapture(void)
 {
-	static std::shared_ptr<const PortFixupState> sLast;
+	std::shared_ptr<const PortFixupState> &sLast = sLastFixupState;
 	if (!sLast || sLast->version != sFixupVersion) {
 		sLast = std::make_shared<const PortFixupState>(PortFixupState{
 			sFixupVersion, sStructU16Fixups, sTexFixupExtent, sTexFixupWords, sProtectedStructRanges,
@@ -2357,4 +2359,17 @@ void portFixupStateRestore(const std::shared_ptr<const PortFixupState> &state)
 	static_cast<std::unordered_set<uintptr_t> &>(sDeswizzle4cFixups) = state->deswizzle4cFixups;
 	static_cast<std::unordered_set<uintptr_t> &>(sChainSlotAddrs) = state->chainSlotAddrs;
 	sFixupVersion = state->version;
+}
+
+/* Re-entry (the game stopped inside a launcher): free the fixup trackers and
+ * the cached snapshot of them outright. */
+extern "C" void portFixupReleaseForReentry(void)
+{
+	std::unordered_set<uintptr_t>().swap(sStructU16Fixups);
+	std::unordered_map<uintptr_t, unsigned int>().swap(sTexFixupExtent);
+	std::unordered_set<uintptr_t>().swap(sTexFixupWords);
+	std::vector<ProtectedRange>().swap(sProtectedStructRanges);
+	std::unordered_set<uintptr_t>().swap(sDeswizzle4cFixups);
+	std::unordered_set<uintptr_t>().swap(sChainSlotAddrs);
+	sLastFixupState.reset();
 }

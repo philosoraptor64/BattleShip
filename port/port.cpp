@@ -1349,7 +1349,9 @@ int PortIsRunning(void) {
 
 } // extern "C"
 
-static int PortMainOnce(int argc, char* argv[]) {
+/* Start-up shared by the stand-alone app and the i64 module: logging,
+ * engine (PortInit), platform hints. Returns 0 on success. */
+static int PortStartup(int argc, char* argv[]) {
 	/* iOS: stage bundled data into Documents and load netplay.cfg into the
 	 * environment before anything reads either. No-op elsewhere. */
 	port_ios_prepare();
@@ -1500,58 +1502,76 @@ static int PortMainOnce(int argc, char* argv[]) {
 	// catch so uncaught C++ exceptions get logged as ssb64.log entries
 	// with type and what() before the process exits, instead of bubbling
 	// up as an opaque MSVC 0xE06D7363 throw.
-	try {
+	return 0;
+}
 
-	// Initialize the game boot sequence (coroutines, thread init, etc.)
+/* One run of the game, in three steps so a host can drive it frame by frame
+ * (the i64 module, port/i64_module.cpp): begin, frames until it returns 0,
+ * end (full shutdown). */
+static int sRunFrame = 0;
+static int sRunMaxFrames = 0;
+static bool sRunHintShown = false;
+
+extern "C" void PortRunBegin(void) {
 	PortGameInit();
-
-	// Main frame loop — each iteration runs one frame of game logic
-	// and rendering through the coroutine system. PortPushFrame posts
-	// a VI tick, resumes the game coroutine, and display lists are
-	// rendered via DrawAndRunGraphicsCommands inside the coroutine.
-	//
-	// SSB64_MAX_FRAMES=N — debug aid that forces a clean shutdown
-	// after N frames. Goes through the same code path as the user
-	// closing the window (Window::Close() sets mIsRunning=false).
-	int maxFrames = 0;
+	sRunMaxFrames = 0;
 	if (const char* env = std::getenv("SSB64_MAX_FRAMES")) {
-		maxFrames = std::atoi(env);
+		sRunMaxFrames = std::atoi(env);
 	}
-	int frame = 0;
-	bool firstRunHintShown = false;
-	while (WindowIsRunning()) {
-		PortPushFrame();
-		frame++;
+	sRunFrame = 0;
+	sRunHintShown = false;
+}
 
-		if (!firstRunHintShown && frame == 60) {
-			auto cv = sContext->GetConsoleVariables();
-			if (cv && cv->GetInteger("gFirstRunHintShown", 0) == 0) {
-				cv->SetInteger("gFirstRunHintShown", 1);
-				if (auto gui = sContext->GetWindow()->GetGui()) {
-					gui->SaveConsoleVariablesNextFrame();
-				}
-			}
-			firstRunHintShown = true;
-		}
-		if (maxFrames > 0 && frame >= maxFrames) {
-			port_log("SSB64: SSB64_MAX_FRAMES=%d reached — triggering clean shutdown\n", maxFrames);
-			if (auto ctx = Ship::Context::GetInstance()) {
-				if (auto win = ctx->GetWindow()) {
-					win->Close();
-				}
-			}
-			break;
-		}
+extern "C" int PortRunFrame(void) {
+	if (!WindowIsRunning()) {
+		return 0;
 	}
+	PortPushFrame();
+	sRunFrame++;
+	if (!sRunHintShown && sRunFrame == 60) {
+		auto cv = sContext->GetConsoleVariables();
+		if (cv && cv->GetInteger("gFirstRunHintShown", 0) == 0) {
+			cv->SetInteger("gFirstRunHintShown", 1);
+			if (auto gui = sContext->GetWindow()->GetGui()) {
+				gui->SaveConsoleVariablesNextFrame();
+			}
+		}
+		sRunHintShown = true;
+	}
+	if (sRunMaxFrames > 0 && sRunFrame >= sRunMaxFrames) {
+		port_log("SSB64: SSB64_MAX_FRAMES=%d reached — triggering clean shutdown\n", sRunMaxFrames);
+		if (auto ctx = Ship::Context::GetInstance()) {
+			if (auto win = ctx->GetWindow()) {
+				win->Close();
+			}
+		}
+		return 0;
+	}
+	return 1;
+}
 
-	port_log("SSB64: main loop exited cleanly at frame=%d (WindowIsRunning=%d)\n",
-	         frame, WindowIsRunning());
-
+extern "C" void PortRunEnd(void) {
+	port_log("SSB64: main loop exited cleanly at frame=%d (WindowIsRunning=%d)\n", sRunFrame, WindowIsRunning());
 	PortGameShutdown();
 	port_log("SSB64: PortGameShutdown returned\n");
-
 	PortShutdown();
 	portRenderDocShutdown();
+}
+
+/* Called by the i64 module to start the engine (logging + PortInit). */
+extern "C" int PortStartupForModule(int argc, char* argv[]) {
+	return PortStartup(argc, argv);
+}
+
+static int PortMainOnce(int argc, char* argv[]) {
+	if (PortStartup(argc, argv) != 0) {
+		return 1;
+	}
+	try {
+	PortRunBegin();
+	while (PortRunFrame()) {
+	}
+	PortRunEnd();
 	return 0;
 
 	} catch (const std::exception& e) {

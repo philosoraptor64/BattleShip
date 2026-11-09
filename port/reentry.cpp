@@ -24,6 +24,12 @@
 #if defined(__APPLE__)
 #include <mach-o/getsect.h>
 #include <mach-o/ldsyms.h>
+// This image's own Mach-O header: the executable's, or the module's when the
+// game is built as a library (i64), where _mh_execute_header is the host's.
+extern "C" void *__dso_handle;
+static inline const struct mach_header_64 *PortThisImage() {
+    return reinterpret_cast<const struct mach_header_64 *>(&__dso_handle);
+}
 #include <mach/mach.h>
 #include <malloc/malloc.h>
 #include <cstdio>
@@ -47,7 +53,7 @@ KEEP unsigned long sSavedBytes = 0;
 void Add(const char *segment, const char *section) {
 #if defined(__APPLE__)
     unsigned long size = 0;
-    uint8_t *base = getsectiondata(&_mh_execute_header, segment, section, &size);
+    uint8_t *base = getsectiondata(PortThisImage(), segment, section, &size);
     if (base == nullptr || size == 0 || sSectionCount >= kMaxSections) {
         return;
     }
@@ -84,6 +90,10 @@ extern "C" void port_reentry_save_pristine(void) {
 extern "C" void portGfxReleaseForReentry(void);
 extern "C" void portRelocTableReleaseForReentry(void);
 extern "C" void portParticleBankReleaseForReentry(void);
+extern "C" void portFixupReleaseForReentry(void);
+extern "C" void portRollbackReleaseForReentry(void);
+extern "C" void port_dl_range_unregister(const void *base);
+extern "C" void *gPortSceneHeap;
 
 /* After shutdown, before the globals are reset: free what the engine's own
  * shutdown leaves in global caches (resetting the globals would only orphan
@@ -92,6 +102,15 @@ extern "C" void port_reentry_release_caches(void) {
     portGfxReleaseForReentry();
     portRelocTableReleaseForReentry();
     portParticleBankReleaseForReentry();
+    portFixupReleaseForReentry();
+    portRollbackReleaseForReentry();
+    // The scene arena (sys/taskman.c) is allocated once and recycled across
+    // scenes; a reset would only forget it.
+    if (gPortSceneHeap != nullptr) {
+        port_dl_range_unregister(gPortSceneHeap);
+        std::free(gPortSceneHeap);
+        gPortSceneHeap = nullptr;
+    }
 }
 
 extern "C" void port_reentry_restore_pristine(void) {
