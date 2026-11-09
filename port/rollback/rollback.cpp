@@ -484,6 +484,9 @@ extern "C" void portRollbackReleaseForReentry(void)
     for (auto &snap : sRing) {
         snap = GameSnapshot();
     }
+    for (auto &snap : sRbRing) {  // netplay rollback's ring
+        snap = GameSnapshot();
+    }
     sFullBefore = GameSnapshot();
     sFullAfter = GameSnapshot();
     std::vector<uint64_t>().swap(sFullSeen);
