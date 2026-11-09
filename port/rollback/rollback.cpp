@@ -201,6 +201,55 @@ void ReportMismatch(uint32_t frame, const uint32_t *expected, const uint32_t *ac
     }
 }
 
+// SSB64_ROLLBACK_SYNCTEST_FULL=1: besides the hash columns, compare the
+// WHOLE snapshot after the original frames with the one after resimulating
+// them, and log every differing byte range once (first 200), with its
+// address as in `nm -n BattleShip` (for data/bss). Finds state that only the
+// normal frame writes (e.g. the renderer writing into game memory between
+// frames), which the hash columns can miss.
+int sFullCompare = -1;
+GameSnapshot sFullBefore, sFullAfter;
+uint32_t sFullDiffChecks, sFullDiffFrames;
+std::vector<uint64_t> sFullSeen;  // (part << 40) | offset of logged ranges
+
+void FullCompare(const char *part, int partId, const std::vector<uint8_t> &a, const std::vector<uint8_t> &b,
+                 const void *base) {
+    if (a.size() != b.size()) {
+        port_log("SSB64 Rollback: FULLDIFF %s size %zu vs %zu\n", part, a.size(), b.size());
+        return;
+    }
+    size_t i = 0;
+    while (i < a.size()) {
+        if (a[i] == b[i]) {
+            i++;
+            continue;
+        }
+        size_t j = i;
+        while (j < a.size() && (a[j] != b[j] || (j + 8 < a.size() && a[j + 8] != b[j + 8]))) j++;
+        const uint64_t key = (static_cast<uint64_t>(partId) << 40) | (i & ~static_cast<size_t>(63));
+        if (std::find(sFullSeen.begin(), sFullSeen.end(), key) == sFullSeen.end() && sFullSeen.size() < 200) {
+            sFullSeen.push_back(key);
+            uint64_t nmAddr = 0;
+#if SSB64_SNAPSHOT_SUPPORTED
+            if (base != nullptr) {
+                nmAddr = 0x100000000ull + (reinterpret_cast<uintptr_t>(base) + i -
+                                           reinterpret_cast<uintptr_t>(&_mh_execute_header));
+            }
+#endif
+            char hexA[100] = "", hexB[100] = "";
+            const size_t from = i & ~static_cast<size_t>(15);
+            for (size_t k = from; k < from + 32 && k < a.size(); k++) {
+                std::snprintf(hexA + (k - from) * 3, 4, "%02x ", a[k]);
+                std::snprintf(hexB + (k - from) * 3, 4, "%02x ", b[k]);
+            }
+            port_log("SSB64 Rollback: FULLDIFF frame=%u %s+0x%zx len=%zu nm=0x%llx\n  frame: %s\n  resim: %s\n", sFrame,
+                     part, i, j - i, (unsigned long long)nmAddr, hexA, hexB);
+        }
+        sFullDiffFrames++;
+        i = j;
+    }
+}
+
 } // namespace
 
 extern "C" int port_rollback_synctest_begin(void) {
@@ -253,6 +302,13 @@ extern "C" void port_rollback_synctest_end(void (*resimulate_frame)(void)) {
     // Rewind to before frame (sFrame - depth) and replay up to the present,
     // re-taking each snapshot on the way as rollback itself will.
     const uint32_t first = sFrame - sSyncTestDepth;
+    if (sFullCompare < 0) {
+        const char *env = std::getenv("SSB64_ROLLBACK_SYNCTEST_FULL");
+        sFullCompare = (env != nullptr && env[0] == '1') ? 1 : 0;
+    }
+    if (sFullCompare) {
+        Save(sFullBefore);
+    }
     auto t = std::chrono::steady_clock::now();
     Restore(sRing[first % kRing]);
     sRestoreUsecs += UsecsSince(t);
@@ -271,6 +327,19 @@ extern "C" void port_rollback_synctest_end(void (*resimulate_frame)(void)) {
     gPortRollbackResim = 0;
     sResimUsecs += UsecsSince(t);
     sSyncTestFrames++;
+    if (sFullCompare) {
+        Save(sFullAfter);
+        sFullDiffChecks++;
+        FullCompare("data", 1, sFullBefore.data, sFullAfter.data, sData.base);
+        FullCompare("bss", 2, sFullBefore.bss, sFullAfter.bss, sBss.base);
+        FullCompare("arena", 3, sFullBefore.arena, sFullAfter.arena, nullptr);
+        FullCompare("audio", 4, sFullBefore.audio, sFullAfter.audio, nullptr);
+        FullCompare("stacks", 5, sFullBefore.stacks, sFullAfter.stacks, nullptr);
+        if (sFullDiffChecks % 600 == 0) {
+            port_log("SSB64 Rollback: FULLDIFF checks=%u differing ranges=%u (distinct logged %zu)\n",
+                     sFullDiffChecks, sFullDiffFrames, sFullSeen.size());
+        }
+    }
 
     if (syNetInputGetTick() != tick) {
         sSyncTestMismatches++;
