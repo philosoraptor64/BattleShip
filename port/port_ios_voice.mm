@@ -112,12 +112,7 @@ extern "C" void port_ios_voice_button_show(void) {
     if (sVoiceWindow != nil) {
         return;
     }
-    // Echo cancellation: voice-chat mode turns on Apple's voice processing
-    // for the microphone (SDL leaves the session in the default mode).
-    NSError* err = nil;
-    if (![[AVAudioSession sharedInstance] setMode:AVAudioSessionModeVoiceChat error:&err]) {
-        port_log("ios voice: voice-chat mode not set (%s)\n", err.localizedDescription.UTF8String);
-    }
+    // (Echo cancellation: n64net sets the voice-chat audio mode when the mic opens.)
     UIWindowScene* scene = nil;
     for (UIScene* s in UIApplication.sharedApplication.connectedScenes) {
         if ([s isKindOfClass:[UIWindowScene class]]) {
