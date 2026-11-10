@@ -179,6 +179,11 @@ endif()
 # Subdirectories: libultraship
 ################################################################################
 
+if (SSB64_I64_MODULE AND CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    # SDL comes from the host app (i64 embeds @rpath/libSDL2-2.0.0.dylib;
+    # LUS_SDL2_PREBUILT points at its build)
+    set(LUS_SHARED_SDL ON CACHE BOOL "" FORCE)
+endif()
 add_subdirectory(libultraship ${CMAKE_BINARY_DIR}/libultraship)
 
 ################################################################################
@@ -561,6 +566,12 @@ else()
     set(_ssb64_port_mm ${SSB64_SRC_PORT})
     list(FILTER _ssb64_port_mm INCLUDE REGEX "\\.mm$")
     set_source_files_properties(${_ssb64_port_mm} PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    if (SSB64_I64_MODULE)
+        # Inside i64 the app's UIKit glue is i64's (ObjC classes are process
+        # wide, too): port/i64/ios_module_stubs.cpp stands in for it.
+        list(FILTER SSB64_SRC_PORT EXCLUDE REGEX "\\.mm$")
+        list(FILTER SSB64_SRC_PORT EXCLUDE REGEX "port/port_ios\\.cpp$")
+    endif()
 endif()
 list(FILTER SSB64_SRC_PORT EXCLUDE REGEX "port/stubs/")
 # RelocFileTable.{us,jp}.cpp both define gRelocFileTable — compile only the
@@ -1005,7 +1016,7 @@ else()
     set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "${SSB64_APP_NAME}")
 endif()
 
-if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if (CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT SSB64_I64_MODULE)
     # iOS app bundle. There is no ROM-extraction flow on device: the build
     # extracts the user's BattleShip.o2r on the Mac (host torch) and the
     # end of this file moves the game data into <App>.app/GameData, which
@@ -1657,7 +1668,7 @@ endif()
 # which on iOS is the bundle root. Move what the game loads into GameData/
 # and drop the desktop-only extraction inputs (incl. the macOS torch binary,
 # which must not ship inside an iOS bundle).
-if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+if (CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT SSB64_I64_MODULE)
     # OFF builds an app that contains nothing derived from the ROM, so it may
     # be given to other people: each player's app extracts BattleShip.o2r
     # from their own ROM on first launch (see port/port_ios.cpp).
