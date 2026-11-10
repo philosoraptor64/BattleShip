@@ -281,8 +281,25 @@ extern "C" N64_GAME_EXPORT n64_frame_result n64_game_frame(void) {
     return PortRunFrame() ? N64_GAME_FRAME_CONTINUE : N64_GAME_FRAME_EXIT;
 }
 
+extern "C" void syNetPeerHostPause(int is_paused, int is_initiator);  // decomp sys/netpeer.c
+
+/* i64 keeps the game while its players are in i64's menu: 1 = this player
+ * paused, 2 = the friend did, 0 = back into the game. Online, both sides tell
+ * each other they're away (no one gives up on the silence); on resume the
+ * player who paused presses Start, which opens the pause menu in a running
+ * VS battle; in menus the game just carries on. */
 extern "C" N64_GAME_EXPORT void n64_game_set_paused(int paused) {
-    (void)paused;  // not yet: i64 simply stops calling frame() meanwhile
+    static int pausedBy = 0;
+    if (!sRunning) {
+        return;
+    }
+    if (paused != 0) {
+        pausedBy = paused;
+        syNetPeerHostPause(1, paused == 1);
+    } else {
+        syNetPeerHostPause(0, pausedBy == 1);
+        pausedBy = 0;
+    }
 }
 
 extern "C" N64_GAME_EXPORT void n64_game_stop(void) {
