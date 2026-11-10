@@ -179,6 +179,9 @@ endif()
 # Subdirectories: libultraship
 ################################################################################
 
+if (SSB64_I64_MODULE)
+    set(LUS_OBJC_PREFIX SSB64 CACHE STRING "" FORCE) # ObjC classes are process wide (i64)
+endif()
 if (SSB64_I64_MODULE AND CMAKE_SYSTEM_NAME STREQUAL "iOS")
     # SDL comes from the host app (i64 embeds @rpath/libSDL2-2.0.0.dylib;
     # LUS_SDL2_PREBUILT points at its build)
