@@ -1,3 +1,4 @@
+#include <cstdio>
 /* Netplay transport when a host app owns the connection (Smash as an i64
  * module: port/i64_module.cpp). netpeer.c then sends and receives through
  * these instead of its own UDP socket, and skips the room server.
@@ -32,6 +33,19 @@ struct Reassembly {
 };
 Reassembly sAssembly;
 } // namespace
+
+// Inside i64: why this side ends the run ("" = it doesn't). The decomp sets it
+// on a desync or when the session ends; the module returns EXIT and i64 shows it.
+extern "C" int port_net_external_active(void);
+static char sPortNetEndReason[200];
+extern "C" void port_net_set_end_reason(const char *why) {
+    if (port_net_external_active() && sPortNetEndReason[0] == 0 && why != nullptr) {
+        snprintf(sPortNetEndReason, sizeof(sPortNetEndReason), "%s", why);
+    }
+}
+extern "C" const char *port_net_end_reason(void) {
+    return sPortNetEndReason;
+}
 
 extern "C" int port_net_external_active(void) {
     return gPortNetHostSend != nullptr && gPortNetHostRecv != nullptr;

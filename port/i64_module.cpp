@@ -274,11 +274,21 @@ extern "C" N64_GAME_EXPORT int n64_game_start(const n64_host* host, const n64_la
     return 0;
 }
 
+extern "C" const char* port_net_end_reason(void);   // port/net/netplay_transport.cpp
+
 extern "C" N64_GAME_EXPORT n64_frame_result n64_game_frame(void) {
     if (!sRunning || sExitRequested) {
         return N64_GAME_FRAME_EXIT;
     }
+    if (port_net_end_reason()[0]) {
+        return N64_GAME_FRAME_EXIT;   // a desync or the friend gone: i64 shows why (n64_game_exit_message)
+    }
     return PortRunFrame() ? N64_GAME_FRAME_CONTINUE : N64_GAME_FRAME_EXIT;
+}
+
+// why frame() ended the game, for i64's menu ("" = the player quit)
+extern "C" N64_GAME_EXPORT void n64_game_exit_message(char* out, size_t cap) {
+    std::snprintf(out, cap, "%s", port_net_end_reason());
 }
 
 extern "C" void syNetPeerHostPause(int is_paused, int is_initiator);  // decomp sys/netpeer.c
