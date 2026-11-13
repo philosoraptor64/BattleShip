@@ -16,6 +16,7 @@
 #if defined(SSB64_I64_MODULE)
 
 #define N64_GAME_BUILDING_MODULE 1
+#include <atomic>
 #include "i64/n64_game.h"
 
 #include "port_log.h"
@@ -68,6 +69,11 @@ const n64_game_info kInfo = {
 /* Survive the reset of the globals between runs (reentry.cpp). */
 #define KEEP __attribute__((section("__DATA,__ssb64keep")))
 KEEP const n64_host* sHost = nullptr;
+/* libultraship gfx_metal.cpp: a picture of the screen for i64's home screen (30 s in, then each minute) */
+extern "C" void (*gLusFrameCaptureCallback)(const uint8_t* rgba, uint32_t w, uint32_t h);
+extern "C" std::atomic<int> gLusFrameCaptureRequest;
+static unsigned sPreviewFrames = 0;
+static constexpr unsigned kPreviewFirst = 1800, kPreviewEvery = 3600; /* host frames (60/s) */
 #if defined(__APPLE__)
 extern "C" uint64_t (*port_coroutine_arena_reserve)(uint64_t size, uint64_t align);   /* coroutine_android.cpp */
 extern "C" void port_coroutine_pool_release_for_reentry(void);
@@ -223,6 +229,8 @@ extern "C" N64_GAME_EXPORT int n64_game_start(const n64_host* host, const n64_la
     port_reentry_save_pristine();
 
     sHost = host;
+    sPreviewFrames = 0;
+    gLusFrameCaptureCallback = host->offer_title_art;
     port_coroutine_arena_reserve = host->arena_reserve;   /* (NULL in an older i64) */
     sExitRequested = false;
     if (host->data_dir != nullptr && host->data_dir[0] != '\0') {
@@ -285,6 +293,9 @@ extern "C" N64_GAME_EXPORT n64_frame_result n64_game_frame(void) {
     if (!sRunning || sExitRequested) {
         return N64_GAME_FRAME_EXIT;
     }
+    if (++sPreviewFrames >= kPreviewFirst && (sPreviewFrames - kPreviewFirst) % kPreviewEvery == 0 && gLusFrameCaptureCallback) {
+        gLusFrameCaptureRequest = 1;
+    }
     if (port_net_end_reason()[0]) {
         return N64_GAME_FRAME_EXIT;   // a desync or the friend gone: i64 shows why (n64_game_exit_message)
     }
@@ -318,6 +329,8 @@ extern "C" N64_GAME_EXPORT void n64_game_set_paused(int paused) {
 }
 
 extern "C" N64_GAME_EXPORT void n64_game_stop(void) {
+    gLusFrameCaptureCallback = nullptr;
+    gLusFrameCaptureRequest = 0;
     if (!sRunning) {
         return;
     }
