@@ -74,6 +74,18 @@ extern "C" void (*gLusFrameCaptureCallback)(const uint8_t* rgba, uint32_t w, uin
 extern "C" std::atomic<int> gLusFrameCaptureRequest;
 static unsigned sPreviewFrames = 0;
 static constexpr unsigned kPreviewFirst = 1800, kPreviewEvery = 3600; /* host frames (60/s) */
+
+/* when to offer a picture: kPreviewFirst, then every kPreviewEvery frames; tests: I64_TEST_PREVIEW_AT="400,700" */
+static bool PreviewDue(unsigned frame) {
+    static const char* at = getenv("I64_TEST_PREVIEW_AT");
+    if (at) {
+        for (const char* p = at; p && *p; p = strchr(p, ',') ? strchr(p, ',') + 1 : nullptr) {
+            if ((unsigned) atoi(p) == frame) return true;
+        }
+        return false;
+    }
+    return frame >= kPreviewFirst && (frame - kPreviewFirst) % kPreviewEvery == 0;
+}
 #if defined(__APPLE__)
 extern "C" uint64_t (*port_coroutine_arena_reserve)(uint64_t size, uint64_t align);   /* coroutine_android.cpp */
 extern "C" void port_coroutine_pool_release_for_reentry(void);
@@ -293,7 +305,8 @@ extern "C" N64_GAME_EXPORT n64_frame_result n64_game_frame(void) {
     if (!sRunning || sExitRequested) {
         return N64_GAME_FRAME_EXIT;
     }
-    if (++sPreviewFrames >= kPreviewFirst && (sPreviewFrames - kPreviewFirst) % kPreviewEvery == 0 && gLusFrameCaptureCallback) {
+    ++sPreviewFrames;
+    if (PreviewDue(sPreviewFrames) && gLusFrameCaptureCallback) {
         gLusFrameCaptureRequest = 1;
     }
     if (port_net_end_reason()[0]) {
