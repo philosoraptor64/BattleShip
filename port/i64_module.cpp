@@ -68,6 +68,10 @@ const n64_game_info kInfo = {
 /* Survive the reset of the globals between runs (reentry.cpp). */
 #define KEEP __attribute__((section("__DATA,__ssb64keep")))
 KEEP const n64_host* sHost = nullptr;
+#if defined(__APPLE__)
+extern "C" uint64_t (*port_coroutine_arena_reserve)(uint64_t size, uint64_t align);   /* coroutine_android.cpp */
+extern "C" void port_coroutine_pool_release_for_reentry(void);
+#endif
 KEEP bool sRunning = false;
 KEEP bool sExitRequested = false;
 KEEP char sLogPath[1024] = {};
@@ -219,6 +223,7 @@ extern "C" N64_GAME_EXPORT int n64_game_start(const n64_host* host, const n64_la
     port_reentry_save_pristine();
 
     sHost = host;
+    port_coroutine_arena_reserve = host->arena_reserve;   /* (NULL in an older i64) */
     sExitRequested = false;
     if (host->data_dir != nullptr && host->data_dir[0] != '\0') {
         SetEnv("SHIP_HOME", host->data_dir);  // config, saves, BattleShip.o2r
@@ -323,6 +328,7 @@ extern "C" N64_GAME_EXPORT void n64_game_stop(void) {
     gPortNetHostRecv = nullptr;
     LUS_SetExternalWindow(nullptr, nullptr);
     port_reentry_release_caches();
+    port_coroutine_pool_release_for_reentry();   /* (its stacks are in i64's arena) */
     port_reentry_restore_pristine();
     sRunning = false;
     sHost = nullptr;

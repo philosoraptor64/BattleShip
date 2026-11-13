@@ -100,6 +100,25 @@ struct PortCoroutine {
 __attribute__((section("__SSB64SNAP,__bss"))) static PortCoroutine sCoroutinePool[PORT_COROUTINE_POOL_SLOTS];
 static char *sCoroutineStackRegion = nullptr;
 static size_t sCoroutineStackStride = 0;
+static int sCoroutinePeak = 0;   /* most slots in use at once (logged when it grows) */
+/* Inside i64 (port/i64_module.cpp: n64_host.arena_reserve) the region comes from i64's game memory arena, which i64
+ * wipes after every run; re-entry resets the pointer above, so a plain mmap would leak the region each run. */
+extern "C" uint64_t (*port_coroutine_arena_reserve)(uint64_t size, uint64_t align);
+uint64_t (*port_coroutine_arena_reserve)(uint64_t size, uint64_t align) = nullptr;
+static bool sCoroutineRegionFromArena = false;
+
+/* i64 module stop: the region goes back with i64's arena (wiped after the run); the next run takes a new one.
+ * (The pool records and this pointer survive re-entry, so forget them here.) */
+extern "C" void port_coroutine_pool_release_for_reentry(void) {
+    if (sCoroutineStackRegion && sCoroutineRegionFromArena) {
+        fprintf(stderr, "SSB64: coroutine stacks released (peak %d of %d slots)\n", sCoroutinePeak, PORT_COROUTINE_POOL_SLOTS);
+        mmap(sCoroutineStackRegion, sCoroutineStackStride * PORT_COROUTINE_POOL_SLOTS, PROT_NONE,
+             MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+        sCoroutineStackRegion = nullptr;
+        sCoroutineRegionFromArena = false;
+        memset(sCoroutinePool, 0, sizeof(sCoroutinePool));
+    }
+}
 #endif
 
 /* Implemented in port/coroutine_aarch64.S (arm64) / coroutine_armv7.S (arm32) */
@@ -154,11 +173,25 @@ PortCoroutine *port_coroutine_create(void (*entry)(void *), void *arg, size_t st
     }
     if (sCoroutineStackRegion == nullptr) {
         sCoroutineStackStride = PORT_COROUTINE_POOL_STACK + ps;
-        void *region = mmap(nullptr, sCoroutineStackStride * PORT_COROUTINE_POOL_SLOTS, PROT_READ | PROT_WRITE,
-                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        const size_t regionSize = sCoroutineStackStride * PORT_COROUTINE_POOL_SLOTS;
+        void *region = MAP_FAILED;
+        if (port_coroutine_arena_reserve) {
+            uint64_t a = port_coroutine_arena_reserve(regionSize, 0);
+            if (a && mprotect((void *)(uintptr_t)a, regionSize, PROT_READ | PROT_WRITE) == 0) {
+                region = (void *)(uintptr_t)a;
+                sCoroutineRegionFromArena = true;
+            } else {
+                fprintf(stderr, "SSB64: i64's arena has no room for the coroutine stacks, using mmap\n");
+            }
+        }
+        if (region == MAP_FAILED) {
+            region = mmap(nullptr, regionSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        }
         if (region == MAP_FAILED) {
             return nullptr;
         }
+        fprintf(stderr, "SSB64: coroutine stacks: %d x %zu KB at %p (%s)\n", PORT_COROUTINE_POOL_SLOTS,
+                sCoroutineStackStride >> 10, region, port_coroutine_arena_reserve ? "i64 arena" : "mmap");
         sCoroutineStackRegion = (char *)region;
         for (int i = 0; i < PORT_COROUTINE_POOL_SLOTS; i++) {
             mprotect(sCoroutineStackRegion + i * sCoroutineStackStride, ps, PROT_NONE);
@@ -172,6 +205,10 @@ PortCoroutine *port_coroutine_create(void (*entry)(void *), void *arg, size_t st
             co->in_use = 1;
             co->stack_mem = sCoroutineStackRegion + i * sCoroutineStackStride;
             co->stack_total = sCoroutineStackStride;
+            if (i + 1 > sCoroutinePeak) {
+                sCoroutinePeak = i + 1;
+                if ((sCoroutinePeak & 7) == 0) fprintf(stderr, "SSB64: coroutine slots in use: %d\n", sCoroutinePeak);
+            }
             break;
         }
     }
