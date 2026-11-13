@@ -96,6 +96,8 @@ extern "C" void portInterpReleaseForReentry(void);
 extern "C" void portFighterRegistryReleaseForReentry(void);
 extern "C" void port_dl_range_unregister(const void *base);
 extern "C" void *gPortSceneHeap;
+extern "C" const size_t gPortSceneHeapSize;
+extern "C" void port_scene_heap_free(void *p, size_t size); /* scene_heap.cpp */
 
 /* After shutdown, before the globals are reset: free what the engine's own
  * shutdown leaves in global caches (resetting the globals would only orphan
@@ -112,7 +114,7 @@ extern "C" void port_reentry_release_caches(void) {
     // scenes; a reset would only forget it.
     if (gPortSceneHeap != nullptr) {
         port_dl_range_unregister(gPortSceneHeap);
-        std::free(gPortSceneHeap);
+        port_scene_heap_free(gPortSceneHeap, gPortSceneHeapSize);
         gPortSceneHeap = nullptr;
     }
 }

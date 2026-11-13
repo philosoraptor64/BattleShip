@@ -5,6 +5,35 @@
 #include <algorithm>
 #include <vector>
 #include <spdlog/spdlog.h>
+#if defined(__APPLE__)
+#include "../i64/n64_bigblock.h"
+#endif
+
+/* The table (4 MB+) straight from the system on Apple: freed at every re-entry, and the system allocator keeps
+ * freed large blocks until the process exits (n64_bigblock.h). Fresh mappings are zero, like calloc. */
+static void *SlotsAlloc(size_t bytes)
+{
+#if defined(__APPLE__)
+    if (void *p = n64_big_alloc(bytes)) return p;
+#endif
+    return calloc(1, bytes);
+}
+static void SlotsFree(void *p)
+{
+#if defined(__APPLE__)
+    if (n64_big_free(p)) return;
+#endif
+    free(p);
+}
+static void *SlotsGrow(void *old, size_t oldBytes, size_t newBytes)
+{
+    void *p = SlotsAlloc(newBytes);
+    if (p != nullptr && old != nullptr) {
+        memcpy(p, old, oldBytes);
+        SlotsFree(old);
+    }
+    return p;
+}
 
 /**
  * Per-slot generational handle table mapping 32-bit token ↔ 64-bit pointer.
@@ -87,7 +116,7 @@ static void ensureCapacity(void)
 {
     if (sSlots == nullptr) {
         sCapacity = INITIAL_CAPACITY;
-        sSlots = (Slot *)calloc(sCapacity, sizeof(Slot));
+        sSlots = (Slot *)SlotsAlloc((size_t)sCapacity * sizeof(Slot));
         /* DIAG (SSB64_RELOC_GEN_SEED=<n>): pre-age every slot's generation.
          * Token top byte = gen >> 4, so gens 16..31 mint 0x01xxxxxx tokens
          * (G_VTX opcode) and 4048..4063 mint 0xFDxxxxxx (SETTIMG) — the
@@ -115,7 +144,7 @@ static void ensureCapacity(void)
         }
         spdlog::info("RelocPointerTable: growing {} -> {} entries",
                      sCapacity, newCapacity);
-        Slot *grown = (Slot *)realloc(sSlots, newCapacity * sizeof(Slot));
+        Slot *grown = (Slot *)SlotsGrow(sSlots, (size_t)sCapacity * sizeof(Slot), (size_t)newCapacity * sizeof(Slot));
         if (grown == nullptr) {
             spdlog::error("RelocPointerTable: out of memory growing to {} entries", newCapacity);
             abort();
@@ -343,7 +372,7 @@ void portRelocJournalForgetBefore(size_t mark)
  * free the token table and its undo journal. */
 extern "C" void portRelocTableReleaseForReentry(void)
 {
-    free(sSlots);
+    SlotsFree(sSlots);
     sSlots = nullptr;
     sCapacity = 0;
     sNextIndex = 1;

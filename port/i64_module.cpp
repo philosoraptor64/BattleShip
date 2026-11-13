@@ -90,6 +90,7 @@ static bool PreviewDue(unsigned frame) {
 #if defined(__APPLE__)
 extern "C" uint64_t (*port_coroutine_arena_reserve)(uint64_t size, uint64_t align);   /* coroutine_android.cpp */
 extern "C" void port_coroutine_pool_release_for_reentry(void);
+extern "C" uint64_t (*gPortSceneHeapArena)(uint64_t size, uint64_t align);
 #endif
 KEEP bool sRunning = false;
 KEEP bool sExitRequested = false;
@@ -246,6 +247,7 @@ extern "C" N64_GAME_EXPORT int n64_game_start(const n64_host* host, const n64_la
     sPreviewFrames = 0;
     gLusFrameCaptureCallback = host->offer_title_art;
     port_coroutine_arena_reserve = host->arena_reserve;   /* (NULL in an older i64) */
+    gPortSceneHeapArena = host->arena_reserve;            /* the 16 MB scene arena too (scene_heap.cpp) */
     sExitRequested = false;
     if (host->data_dir != nullptr && host->data_dir[0] != '\0') {
         SetEnv("SHIP_HOME", host->data_dir);  // config, saves, BattleShip.o2r
