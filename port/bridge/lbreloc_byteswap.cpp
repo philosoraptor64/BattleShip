@@ -1605,9 +1605,30 @@ extern "C" void portRelocFixupTextureAtRuntime(const void *addr, unsigned int nu
 	{
 		extern void *portRelocTryResolvePointer(uint32_t token);
 		uintptr_t scan_end = target + num_bytes;
+		/* The same scan, cheaper: when the registry holds fewer slots than the range has words, visit the slots
+		 * inside the range in address order instead of probing every word (start-up loads many textures: the
+		 * per-word probes were a ~100 ms hitch on Smash's first frames inside i64). */
+		std::vector<uintptr_t> inRange;
+		const bool bySlots = sChainSlotAddrs.size() < (size_t)(num_bytes / 4);
+		if (bySlots)
+		{
+			for (uintptr_t a : static_cast<const std::unordered_set<uintptr_t> &>(sChainSlotAddrs))
+			{
+				if (a >= target && a < scan_end && ((a - target) & 3) == 0)
+					inRange.push_back(a);
+			}
+			std::sort(inRange.begin(), inRange.end());
+		}
+		size_t slotIndex = 0;
 		for (uintptr_t w = target; w < scan_end; w += 4)
 		{
-			if (!sChainSlotAddrs.count(w))
+			if (bySlots)
+			{
+				if (slotIndex >= inRange.size())
+					break;
+				w = inRange[slotIndex++];
+			}
+			else if (!sChainSlotAddrs.count(w))
 				continue;
 			/* Registry entries can outlive their file epoch: a reload at
 			 * the same address (force-heap rewind, bump reuse) evicts only
@@ -1642,17 +1663,21 @@ extern "C" void portRelocFixupTextureAtRuntime(const void *addr, unsigned int nu
 	size_t num_words = num_bytes / 4;
 	size_t fixed_words = 0;
 	size_t skipped_words = 0;
+	/* one insert per word on the plain set (was count + insert), and the change mark once per texture instead of
+	 * once per word: the same contents and the same snapshot versioning, half the hashing (start-up hitch) */
+	auto &fixed = static_cast<std::unordered_set<uintptr_t> &>(sTexFixupWords);
 	for (size_t i = 0; i < num_words; i++)
 	{
 		uintptr_t word_key = target + (uintptr_t)i * 4;
-		if (sTexFixupWords.count(word_key)) {
+		if (!fixed.insert(word_key).second) {
 			skipped_words++;
 			continue;
 		}
-		sTexFixupWords.insert(word_key);
 		region[i] = BSWAP32(region[i]);
 		fixed_words++;
 	}
+	if (fixed_words != 0)
+		fixupStateChanged();
 
 	if (fixed_words == 0)
 	{

@@ -55,6 +55,7 @@ extern "C" bool port_drain_pending_menu_toggle(void);
 #include "port_log.h"
 #include "rollback/rollback.h"
 #include "renderdoc_trigger.h"
+extern "C" bool gLusHostPaced; /* libultraship gfx_sdl2.cpp: i64 paces the frames */
 
 /* Backbuffer screenshot capture — implemented in libultraship's DX11 backend.
  * Returns 1 on success, 0 on failure (silent). Never throws. */
@@ -869,7 +870,7 @@ void PortPushFrame(void)
 				}
 			}
 
-			if (!idlePresented) {
+			if (!idlePresented && !gLusHostPaced) { /* (inside i64 the host paces every frame) */
 				/* Fallback pace to one VI period if there is no cached
 				 * framebuffer yet. Normal idle presents pace through the
 				 * backend's SwapBuffers path. */
