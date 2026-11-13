@@ -164,6 +164,8 @@ extern "C" void port_reentry_stats(unsigned long *footprint_kb, unsigned int *th
 #include <algorithm>
 #include <new>
 
+#include "i64/n64_bigblock.h"
+
 namespace {
 struct PreMainBlock {
     void *ptr;
@@ -190,7 +192,8 @@ bool IsPreMain(void *p) {
 }
 
 void *Allocate(size_t n) {
-    void *p = std::malloc(n ? n : 1);
+    void *p = n64_big_alloc(n);  // big blocks go back to the system when freed (n64_bigblock.h)
+    if (p == nullptr) p = std::malloc(n ? n : 1);
     if (p == nullptr) {
         throw std::bad_alloc();
     }
@@ -214,7 +217,7 @@ void Release(void *p) {
     } else if (IsPreMain(p)) {
         return;  // kept for the next run's restored globals
     }
-    std::free(p);
+    if (!n64_big_free(p)) std::free(p);
 }
 } // namespace
 
