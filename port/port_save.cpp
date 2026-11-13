@@ -1,3 +1,8 @@
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+#include <cstdint>
+#include <vector>
 #include "port_save.h"
 #include "port_log.h"
 
@@ -92,44 +97,43 @@ extern "C" int port_save_write(uintptr_t offset, const void *src, size_t size)
 {
     if (size == 0) return 0;
 
-    const char *path = savePath().c_str();
+    const std::string &path = savePath();
 
-    FILE *f = std::fopen(path, "r+b");
+    // The whole save is read, patched in memory and written to a temporary file that then
+    // replaces the save in one step (rename): stopped mid-write (a crash, iOS ending the app,
+    // i64 stopping the game), the old save stays whole instead of half-updated.
+    std::vector<uint8_t> image;
+    if (FILE *in = std::fopen(path.c_str(), "rb")) {
+        std::fseek(in, 0, SEEK_END);
+        long n = std::ftell(in);
+        std::fseek(in, 0, SEEK_SET);
+        if (n > 0) {
+            image.resize((size_t)n);
+            image.resize(std::fread(image.data(), 1, (size_t)n, in));
+        }
+        std::fclose(in);
+    }
+    if (image.size() < offset + size) image.resize(offset + size, 0);   // zero-padded, as before
+    std::memcpy(image.data() + offset, src, size);
+
+    const std::string tmp = path + ".tmp";
+    FILE *f = std::fopen(tmp.c_str(), "wb");
     if (f == NULL) {
-        f = std::fopen(path, "w+b");
-        if (f == NULL) {
-            port_log("SSB64 Save: open(%s) for write failed\n", path);
-            return -1;
-        }
+        port_log("SSB64 Save: open(%s) for write failed\n", tmp.c_str());
+        return -1;
     }
-
-    std::fseek(f, 0, SEEK_END);
-    long cur = std::ftell(f);
-    if (cur < (long)(offset + size)) {
-        // pad with zeros up to offset
-        if (cur < (long)offset) {
-            static const char zeros[256] = {0};
-            long need = (long)offset - cur;
-            while (need > 0) {
-                size_t chunk = need > (long)sizeof(zeros) ? sizeof(zeros) : (size_t)need;
-                if (std::fwrite(zeros, 1, chunk, f) != chunk) {
-                    port_log("SSB64 Save: zero-pad write failed at offset 0x%lx\n",
-                             (unsigned long)offset);
-                    std::fclose(f);
-                    return -1;
-                }
-                need -= chunk;
-            }
-        }
-    }
-    std::fseek(f, (long)offset, SEEK_SET);
-    size_t wrote = std::fwrite(src, 1, size, f);
-    std::fflush(f);
-    std::fclose(f);
-
-    if (wrote != size) {
-        port_log("SSB64 Save: short write (%zu/%zu) at offset 0x%lx\n",
-                 wrote, size, (unsigned long)offset);
+    bool ok = std::fwrite(image.data(), 1, image.size(), f) == image.size() && std::fflush(f) == 0;
+#ifndef _WIN32
+    if (ok) ok = fsync(fileno(f)) == 0;
+#endif
+    if (std::fclose(f) != 0) ok = false;
+#ifdef _WIN32
+    if (ok) std::remove(path.c_str());   // rename doesn't replace an existing file on Windows
+#endif
+    if (ok) ok = std::rename(tmp.c_str(), path.c_str()) == 0;
+    if (!ok) {
+        std::remove(tmp.c_str());
+        port_log("SSB64 Save: write of 0x%zx bytes at offset 0x%lx failed\n", size, (unsigned long)offset);
         return -1;
     }
     return 0;
