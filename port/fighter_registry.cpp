@@ -31,6 +31,13 @@ const FighterDescriptor *get(int fkind)
 
 extern "C" {
 
+/* i64 re-entry: the registry is seeded again by the next run's PortInit; the
+ * restore of the globals would only forget the rows (27 blocks per run) */
+void portFighterRegistryReleaseForReentry(void)
+{
+    std::vector<FDPtr>().swap(sRegistry);
+}
+
 void port_fighter_register(int fkind, const FighterDescriptor *src)
 {
     if (fkind < 0 || src == nullptr) return;

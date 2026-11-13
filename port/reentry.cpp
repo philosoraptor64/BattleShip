@@ -92,6 +92,8 @@ extern "C" void portRelocTableReleaseForReentry(void);
 extern "C" void portParticleBankReleaseForReentry(void);
 extern "C" void portFixupReleaseForReentry(void);
 extern "C" void portRollbackReleaseForReentry(void);
+extern "C" void portInterpReleaseForReentry(void);
+extern "C" void portFighterRegistryReleaseForReentry(void);
 extern "C" void port_dl_range_unregister(const void *base);
 extern "C" void *gPortSceneHeap;
 
@@ -104,6 +106,8 @@ extern "C" void port_reentry_release_caches(void) {
     portParticleBankReleaseForReentry();
     portFixupReleaseForReentry();
     portRollbackReleaseForReentry();
+    portInterpReleaseForReentry();
+    portFighterRegistryReleaseForReentry();
     // The scene arena (sys/taskman.c) is allocated once and recycled across
     // scenes; a reset would only forget it.
     if (gPortSceneHeap != nullptr) {

@@ -146,6 +146,10 @@ static void wavWriteHeader(FILE *fp, uint32_t dataBytes)
 static void wavMaybeOpen(void)
 {
     if (sWavFile != nullptr || sWavBytesWritten >= kWavMaxBytes) return;
+    /* debug aid only on request: it wrote 16 s of audio to /tmp on every start and,
+     * when a run (i64) ended sooner, never closed the file */
+    static const bool wanted = std::getenv("SSB64_WAV_DUMP") != nullptr;
+    if (!wanted) return;
     sWavFile = std::fopen("/tmp/ssb64_dump.wav", "wb");
     if (sWavFile == nullptr) {
         port_log("SSB64 Audio: WAV dump open failed (errno preserved by fopen)\n");

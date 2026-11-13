@@ -467,3 +467,16 @@ extern "C" void portInterpNoteTicDuration(long long micros)
         sOverrunTics = 0;
     }
 }
+
+/* i64 re-entry: free the per-frame tables (the restore of the globals would only
+ * forget them, ~200 KB per run); the next run re-arms them through
+ * portInterpApplyConfig */
+extern "C" void portInterpReleaseForReentry(void)
+{
+    std::vector<RecordEntry>().swap(sRecords);
+    std::vector<SnapEntry>().swap(sCur);
+    std::vector<SnapEntry>().swap(sPrev);
+    std::unordered_map<uint64_t, uint32_t>().swap(sPrevIndex);
+    std::vector<PairEntry>().swap(sPairs);
+    std::unordered_map<Mtx *, MtxF>().swap(sReplacements);
+}
