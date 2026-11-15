@@ -17,6 +17,8 @@ extern "C" {
 /* Set by the module while a run uses the host's connection. */
 int (*gPortNetHostSend)(const void* data, uint32_t size) = nullptr;
 int (*gPortNetHostRecv)(void* buf, uint32_t cap) = nullptr;
+/* i64 ABI v2 (more than two devices): which device a datagram came from (0 = the session's host) */
+int (*gPortNetHostRecvFrom)(void* buf, uint32_t cap, uint32_t* machine) = nullptr;
 uint32_t gPortNetHostMaxDatagram = 1200;
 }
 
@@ -31,7 +33,7 @@ struct Reassembly {
     uint8_t received = 0;
     std::vector<std::vector<uint8_t>> parts;
 };
-Reassembly sAssembly;
+Reassembly sAssemblies[5];   /* per sending device (4 = unknown) */
 } // namespace
 
 // Inside i64: why this side ends the run ("" = it doesn't). The decomp sets it
@@ -79,13 +81,17 @@ extern "C" int port_net_external_send(const uint8_t* data, uint32_t size) {
     return 1;
 }
 
-/* Next whole packet into `out` (cap bytes): its size, or -1 if none waiting. */
-extern "C" int port_net_external_recv(uint8_t* out, uint32_t cap) {
+/* Next whole packet into `out` (cap bytes): its size, or -1 if none waiting; *machine = its sender (-1 if
+ * the host can't say). Fragments are put together per sender (several devices send at once). */
+extern "C" int port_net_external_recv_from(uint8_t* out, uint32_t cap, int* machine) {
     if (!port_net_external_active()) return -1;
     uint8_t buf[2048];
     for (;;) {
-        const int n = gPortNetHostRecv(buf, sizeof buf);
+        uint32_t from = UINT32_MAX;
+        const int n = gPortNetHostRecvFrom ? gPortNetHostRecvFrom(buf, sizeof buf, &from) : gPortNetHostRecv(buf, sizeof buf);
         if (n <= 0) return -1;
+        if (machine) *machine = from < 4 ? (int)from : -1;
+        Reassembly& sAssembly = sAssemblies[from < 4 ? from : 4];
         if (buf[0] == kWhole) {
             const uint32_t size = (uint32_t)n - 1;
             if (size > cap) continue;
@@ -119,4 +125,8 @@ extern "C" int port_net_external_recv(uint8_t* out, uint32_t cap) {
         sAssembly = Reassembly();
         return (int)total;
     }
+}
+
+extern "C" int port_net_external_recv(uint8_t* out, uint32_t cap) {
+    return port_net_external_recv_from(out, cap, nullptr);
 }

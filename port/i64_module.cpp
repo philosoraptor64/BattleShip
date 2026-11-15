@@ -45,6 +45,7 @@ extern uint32_t (*gPortHostAudioBuffered)(uint32_t rate);
 /* Online: the host's game channel (port/net/netplay_transport.cpp). */
 extern int (*gPortNetHostSend)(const void* data, uint32_t size);
 extern int (*gPortNetHostRecv)(void* buf, uint32_t cap);
+extern int (*gPortNetHostRecvFrom)(void* buf, uint32_t cap, uint32_t* machine);
 extern uint32_t gPortNetHostMaxDatagram;
 }
 
@@ -61,9 +62,12 @@ const n64_game_info kInfo = {
     kRoms,
     1,
     SSB64_NETPLAY_BUILD_ID,
-    2,
+    4,      /* players: up to 4 over up to 4 devices (several controllers on one device) */
     60,
     0,
+    /* v2: a device that leaves: its player stays in with nothing pressed (a CPU taking over: later) */
+    N64_DROPOUT_CAN_IDLE,
+    4,
 };
 
 /* Survive the reset of the globals between runs (reentry.cpp). */
@@ -217,9 +221,8 @@ extern "C" N64_GAME_EXPORT int n64_game_start(const n64_host* host, const n64_la
         std::snprintf(err, err_size, "i64 and this game module disagree on the interface version");
         return 1;
     }
-    if (launch->mode == N64_LAUNCH_ONLINE &&
-        (host->net_send == nullptr || host->net_recv == nullptr || launch->local_player > 1)) {
-        std::snprintf(err, err_size, "online needs i64's game channel and 2 players");
+    if (launch->mode == N64_LAUNCH_ONLINE && (host->net_send == nullptr || host->net_recv == nullptr)) {
+        std::snprintf(err, err_size, "online needs i64's game channel");
         return 1;
     }
     /* Game data: imported from the player's ROM by n64_game_import_rom, for
@@ -269,24 +272,42 @@ extern "C" N64_GAME_EXPORT int n64_game_start(const n64_host* host, const n64_la
         "SSB64_NETPLAY", "SSB64_NETPLAY_MODE", "SSB64_NETPLAY_BOOTSTRAP", "SSB64_NETPLAY_HOST",
         "SSB64_NETPLAY_LOCAL_PLAYER", "SSB64_NETPLAY_REMOTE_PLAYER", "SSB64_NETPLAY_BIND", "SSB64_NETPLAY_PEER",
         "SSB64_NETPLAY_SERVER", "SSB64_NETPLAY_ROOM", "SSB64_NETPLAY_PASSWORD", "SSB64_NETPLAY_SEED",
-        "SSB64_NETPLAY_VOICE", "SSB64_NETPLAY_LOBBY", "SSB64_NETPLAY_SESSION",
+        "SSB64_NETPLAY_VOICE", "SSB64_NETPLAY_LOBBY", "SSB64_NETPLAY_SESSION", "SSB64_NETPLAY_LOCAL_MASK",
+        "SSB64_NETPLAY_REMOTE_MASK", "SSB64_NETPLAY_PADS", "SSB64_NETPLAY_MACHINES",
     };
     for (const char* v : kNetVars) unsetenv(v);
     gPortNetHostSend = nullptr;
     gPortNetHostRecv = nullptr;
+    gPortNetHostRecvFrom = nullptr;
     if (launch->mode == N64_LAUNCH_ONLINE) {
-        const bool isHost = launch->local_player == 0;
+        const bool isHost = launch->local_machine == 0;
+        /* the player table (ports in order): this device's players and everyone else's */
+        unsigned localMask = 0, remoteMask = 0;
+        std::string pads;
+        for (uint32_t p = 0; p < launch->player_count && p < 4; p++) {
+            (launch->players[p].local ? localMask : remoteMask) |= 1u << p;
+            pads += std::string(p ? "," : "") + std::to_string(launch->players[p].local ? launch->players[p].pad : 0);
+        }
+        if (localMask == 0 || remoteMask == 0) {
+            std::snprintf(err, err_size, "online needs players on this device and on another");
+            return 1;
+        }
         SetEnv("SSB64_NETPLAY", "1");
         SetEnv("SSB64_NETPLAY_MODE", "session");      // the whole game as one console
         SetEnv("SSB64_NETPLAY_BOOTSTRAP", "1");
         if (isHost) SetEnv("SSB64_NETPLAY_HOST", "1");
-        SetEnv("SSB64_NETPLAY_LOCAL_PLAYER", isHost ? "0" : "1");
-        SetEnv("SSB64_NETPLAY_REMOTE_PLAYER", isHost ? "1" : "0");
+        SetEnv("SSB64_NETPLAY_LOCAL_PLAYER", std::to_string(__builtin_ctz(localMask)));
+        SetEnv("SSB64_NETPLAY_REMOTE_PLAYER", std::to_string(__builtin_ctz(remoteMask)));
+        SetEnv("SSB64_NETPLAY_LOCAL_MASK", std::to_string(localMask));
+        SetEnv("SSB64_NETPLAY_REMOTE_MASK", std::to_string(remoteMask));
+        SetEnv("SSB64_NETPLAY_PADS", pads);
+        SetEnv("SSB64_NETPLAY_MACHINES", std::to_string(launch->num_machines));
         SetEnv("SSB64_NETPLAY_BIND", "0.0.0.0:0");     // unused: i64's channel
         SetEnv("SSB64_NETPLAY_PEER", "0.0.0.0:0");
         if (launch->seed != 0) SetEnv("SSB64_NETPLAY_SEED", std::to_string(launch->seed));
         gPortNetHostSend = host->net_send;
         gPortNetHostRecv = host->net_recv;
+        gPortNetHostRecvFrom = host->net_recv_from;
         gPortNetHostMaxDatagram = host->net_max_datagram ? host->net_max_datagram : 1200;
     }
     gPortHostAudioWrite = host->audio_write;
@@ -325,6 +346,15 @@ extern "C" N64_GAME_EXPORT void n64_game_exit_message(char* out, size_t cap) {
 }
 
 extern "C" void syNetPeerHostPause(int is_paused, int is_initiator);  // decomp sys/netpeer.c
+extern "C" int syNetPeerDropoutIdle(int player);                      // decomp sys/netpeer.c
+
+/* i64's drop-out menu (the host's module): a device left a session of more than two. Its player stays
+ * in, with nothing pressed, from a tick every device agrees on. */
+extern "C" N64_GAME_EXPORT int n64_game_dropout(uint32_t player, n64_dropout_action action, const uint32_t*,
+                                                uint32_t) {
+    if (action != N64_DROPOUT_IDLE || player >= 4) return 1;
+    return syNetPeerDropoutIdle((int)player);
+}
 
 /* i64 keeps the game while its players are in i64's menu: 1 = this player
  * paused, 2 = the friend did, 0 = back into the game. Online, both sides tell
@@ -356,6 +386,7 @@ extern "C" N64_GAME_EXPORT void n64_game_stop(void) {
     gPortHostAudioBuffered = nullptr;
     gPortNetHostSend = nullptr;
     gPortNetHostRecv = nullptr;
+    gPortNetHostRecvFrom = nullptr;
     LUS_SetExternalWindow(nullptr, nullptr);
     port_reentry_release_caches();
     port_coroutine_pool_release_for_reentry();   /* (its stacks are in i64's arena) */
