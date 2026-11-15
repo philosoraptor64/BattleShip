@@ -64,7 +64,7 @@ const n64_game_info kInfo = {
     SSB64_NETPLAY_BUILD_ID,
     4,      /* players: up to 4 over up to 4 devices (several controllers on one device) */
     60,
-    0,
+    N64_GAME_INFO_CAN_UNLOCK_ALL,   /* "everything unlocked" (all characters, Mushroom Kingdom, item switch, sound test) */
     /* v2: a device that leaves: the game's own CPU takes its fighter over, or it stays in with nothing pressed */
     N64_DROPOUT_CAN_CPU | N64_DROPOUT_CAN_IDLE,
     4,
@@ -73,6 +73,8 @@ const n64_game_info kInfo = {
 /* Survive the reset of the globals between runs (reentry.cpp). */
 #define KEEP __attribute__((section("__DATA,__ssb64keep")))
 KEEP const n64_host* sHost = nullptr;
+bool sUnlockAll = false;
+extern "C" void port_save_reset_path(void);   // port/port_save.cpp
 extern "C" bool gLusHostPaced; /* libultraship gfx_sdl2.cpp */
 /* libultraship gfx_metal.cpp: a picture of the screen for i64's home screen (30 s in, then each minute) */
 extern "C" void (*gLusFrameCaptureCallback)(const uint8_t* rgba, uint32_t w, uint32_t h);
@@ -260,6 +262,14 @@ extern "C" N64_GAME_EXPORT int n64_game_start(const n64_host* host, const n64_la
     if (host->bundle_dir != nullptr && host->bundle_dir[0] != '\0') {
         SetEnv("SSB64_BUNDLE_DIR", host->bundle_dir);  // f3d.o2r, fonts, gamecontrollerdb.txt
     }
+    /* "everything unlocked" (i64's choice; online the host's): a save of its own, so its progress is kept and the
+     * normal save never gets the unlocks (decomp lb/lbbackup.c applies them at boot) */
+    sUnlockAll = (launch->flags & N64_LAUNCH_UNLOCK_ALL) != 0;
+    unsetenv("SSB64_SAVE_PATH");
+    if (sUnlockAll && host->data_dir != nullptr && host->data_dir[0] != '\0') {
+        SetEnv("SSB64_SAVE_PATH", std::string(host->data_dir) + "/ssb64_save-unlocked.bin");
+    }
+    port_save_reset_path();
     if (sRendererWindow != host->window) {
         sRenderer = nullptr;  // a different window: LUS creates a new renderer
         sRendererWindow = host->window;
@@ -346,6 +356,8 @@ extern "C" N64_GAME_EXPORT void n64_game_exit_message(char* out, size_t cap) {
 }
 
 extern "C" void syNetPeerHostPause(int is_paused, int is_initiator);  // decomp sys/netpeer.c
+// "everything unlocked" this run (decomp lb/lbbackup.c asks at boot)
+extern "C" int port_unlock_all_active(void) { return sUnlockAll ? 1 : 0; }
 extern "C" int syNetPeerDropoutIdle(int player);                      // decomp sys/netpeer.c
 extern "C" int syNetPeerDropoutCpu(int player, int level);
 

@@ -35,7 +35,8 @@
 
 namespace {
 
-std::once_flag gPathOnce;
+std::mutex gPathMutex;
+bool gPathResolved = false;   // per run (port_save_reset_path): i64 starts the game several times in one process
 std::string gSavePath;
 
 void resolveSavePath()
@@ -64,11 +65,22 @@ void resolveSavePath()
 
 const std::string &savePath()
 {
-    std::call_once(gPathOnce, resolveSavePath);
+    std::lock_guard<std::mutex> lock(gPathMutex);
+    if (!gPathResolved) {
+        resolveSavePath();
+        gPathResolved = true;
+    }
     return gSavePath;
 }
 
 } // namespace
+
+// a new run: the save path is looked up again (SSB64_SAVE_PATH may differ, e.g. the "everything unlocked" save)
+extern "C" void port_save_reset_path(void)
+{
+    std::lock_guard<std::mutex> lock(gPathMutex);
+    gPathResolved = false;
+}
 
 extern "C" const char *port_save_get_path(void)
 {

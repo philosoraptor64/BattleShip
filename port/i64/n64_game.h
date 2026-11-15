@@ -93,6 +93,7 @@ typedef struct n64_game_info {
                                              over (n64_game_admit; the newcomer starts with N64_LAUNCH_JOINING) */
 
 #define N64_GAME_INFO_OWN_THREAD (1u << 0) /* see the lifecycle note above */
+#define N64_GAME_INFO_CAN_UNLOCK_ALL (1u << 1) /* the game can start with everything unlocked (N64_LAUNCH_UNLOCK_ALL) */
 
 N64_GAME_EXPORT const n64_game_info* n64_game_get_info(void);
 
@@ -265,6 +266,11 @@ typedef struct n64_launch {
  * fast-forward through the host's input log; no pacing, drawing or sound needed) and its players become
  * human again at the tick the host announces. */
 #define N64_LAUNCH_JOINING (1u << 2)
+/* everything unlocked (characters, modes, stages, options: what the game would otherwise unlock by playing), from
+ * i64's per-game setting; online the host's choice, the same on every machine. The module makes it part of the
+ * game's starting state and never writes it into the player's save file: an unlocked run keeps a save of its own
+ * (recomp runtime: recomp_save_subfolder "unlocked"), so its progress is kept too. */
+#define N64_LAUNCH_UNLOCK_ALL (1u << 3)
 
 #define N64_GAME_SESSION_BLOB_MAX (64 * 1024)
 
