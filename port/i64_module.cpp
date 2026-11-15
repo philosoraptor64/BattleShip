@@ -261,6 +261,12 @@ extern "C" N64_GAME_EXPORT int n64_game_start(const n64_host* host, const n64_la
     }
     if (host->bundle_dir != nullptr && host->bundle_dir[0] != '\0') {
         SetEnv("SSB64_BUNDLE_DIR", host->bundle_dir);  // f3d.o2r, fonts, gamecontrollerdb.txt
+        /* the renderer's shader archive comes with the module: without it libultraship's loader stops and the
+         * shader warm-up waits for ever (a module installed without its resources): say so instead */
+        if (!std::filesystem::exists(std::string(host->bundle_dir) + "/f3d.o2r")) {
+            std::snprintf(err, err_size, "Super Smash Bros. is missing part of its install (f3d.o2r): reinstall i64");
+            return 1;
+        }
     }
     /* "everything unlocked" (i64's choice; online the host's): a save of its own, so its progress is kept and the
      * normal save never gets the unlocks (decomp lb/lbbackup.c applies them at boot) */

@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.24.0 FATAL_ERROR)
 
 project(ssb64 LANGUAGES C CXX)
+
+# Builds carry no folder names of this machine (__FILE__ in logs and asserts, debug info): paths under the home
+# folder become ~/...
+if (NOT MSVC AND DEFINED ENV{HOME})
+    add_compile_options("-ffile-prefix-map=$ENV{HOME}=~")
+endif()
 option(SSB64_I64_MODULE "Build the game as an i64 module (shared library, n64_game.h)" OFF)
 
 option(BATTLESHIP_UWP "Build the native DLL used by the Xbox/UWP wrapper" OFF)
