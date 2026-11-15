@@ -173,6 +173,7 @@ struct PreMainBlock {
     void *ptr;
     size_t size;
     uint8_t *copy;
+    size_t mallocSize;  // malloc_size at the seal (0 = not a malloc block)
 };
 constexpr int kMaxPreMain = 8192;
 KEEP PreMainBlock sPreMain[kMaxPreMain] = {};
@@ -200,7 +201,7 @@ void *Allocate(size_t n) {
         throw std::bad_alloc();
     }
     if (!sPreMainSealed && sPreMainCount < kMaxPreMain) {
-        sPreMain[sPreMainCount++] = {p, n, nullptr};
+        sPreMain[sPreMainCount++] = {p, n, nullptr, 0};
     }
     return p;
 }
@@ -246,14 +247,31 @@ static void SealPreMainBlocks(void) {
     for (int i = 0; i < sPreMainCount; i++) {
         sPreMain[i].copy = static_cast<uint8_t *>(std::malloc(sPreMain[i].size ? sPreMain[i].size : 1));
         std::memcpy(sPreMain[i].copy, sPreMain[i].ptr, sPreMain[i].size);
+        sPreMain[i].mallocSize = malloc_size(sPreMain[i].ptr);
         bytes += sPreMain[i].size;
     }
     sPreMainSealed = true;
     std::fprintf(stderr, "SSB64 reentry: kept %d C++ blocks (%zu KB) made before main\n", sPreMainCount, bytes / 1024);
 }
 
+// A block can still be freed behind our back: code in another library (libc++'s own compiled functions) frees
+// with free(), not through this module's delete, and the allocator may have given the memory to someone else
+// (seen in Mario Kart on the iPhone: the process's environment list was overwritten, i64 crashed after the stop).
+// Restore only blocks that are still allocated as they were; drop the others.
 static void RestorePreMainBlocks(void) {
+    int dropped = 0;
     for (int i = 0; i < sPreMainCount; i++) {
+        if (sPreMain[i].mallocSize != 0 && malloc_size(sPreMain[i].ptr) != sPreMain[i].mallocSize) {
+            sPreMain[i] = sPreMain[--sPreMainCount];
+            i--;
+            dropped++;
+            continue;
+        }
         std::memcpy(sPreMain[i].ptr, sPreMain[i].copy, sPreMain[i].size);
+    }
+    if (dropped) {
+        std::sort(sPreMain, sPreMain + sPreMainCount,
+                  [](const PreMainBlock &a, const PreMainBlock &b) { return a.ptr < b.ptr; });
+        std::fprintf(stderr, "SSB64 reentry: %d pre-main blocks dropped (freed outside the module)\n", dropped);
     }
 }
