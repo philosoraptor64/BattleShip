@@ -65,8 +65,8 @@ const n64_game_info kInfo = {
     4,      /* players: up to 4 over up to 4 devices (several controllers on one device) */
     60,
     0,
-    /* v2: a device that leaves: its player stays in with nothing pressed (a CPU taking over: later) */
-    N64_DROPOUT_CAN_IDLE,
+    /* v2: a device that leaves: the game's own CPU takes its fighter over, or it stays in with nothing pressed */
+    N64_DROPOUT_CAN_CPU | N64_DROPOUT_CAN_IDLE,
     4,
 };
 
@@ -347,13 +347,29 @@ extern "C" N64_GAME_EXPORT void n64_game_exit_message(char* out, size_t cap) {
 
 extern "C" void syNetPeerHostPause(int is_paused, int is_initiator);  // decomp sys/netpeer.c
 extern "C" int syNetPeerDropoutIdle(int player);                      // decomp sys/netpeer.c
+extern "C" int syNetPeerDropoutCpu(int player, int level);
 
 /* i64's drop-out menu (the host's module): a device left a session of more than two. Its player stays
  * in, with nothing pressed, from a tick every device agrees on. */
-extern "C" N64_GAME_EXPORT int n64_game_dropout(uint32_t player, n64_dropout_action action, const uint32_t*,
-                                                uint32_t) {
-    if (action != N64_DROPOUT_IDLE || player >= 4) return 1;
-    return syNetPeerDropoutIdle((int)player);
+extern "C" N64_GAME_EXPORT int n64_game_dropout(uint32_t player, n64_dropout_action action, const uint32_t* sel,
+                                                uint32_t count) {
+    if (player >= 4) return 1;
+    if (action == N64_DROPOUT_CPU) return syNetPeerDropoutCpu((int)player, count > 0 ? (int)sel[0] + 1 : 5);
+    if (action == N64_DROPOUT_IDLE) return syNetPeerDropoutIdle((int)player);
+    return 1;
+}
+
+/* The CPU dialog: Smash's own CPU levels 1-9 (option k = level k + 1). */
+extern "C" N64_GAME_EXPORT int n64_game_cpu_options(uint32_t player, n64_cpu_options* out) {
+    static const char* const kLevels[9] = {"1", "2", "3", "4", "5", "6", "7", "8", "9"};
+    if (player >= 4) return 0;
+    std::memset(out, 0, sizeof(*out));
+    out->choice_count = 1;
+    out->choices[0].label = "Level";
+    out->choices[0].count = 9;
+    for (int i = 0; i < 9; i++) out->choices[0].options[i] = kLevels[i];
+    out->choices[0].initial = 4;
+    return 1;
 }
 
 /* i64 keeps the game while its players are in i64's menu: 1 = this player
