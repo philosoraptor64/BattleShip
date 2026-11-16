@@ -48,6 +48,8 @@ extern int (*gPortNetHostSend)(const void* data, uint32_t size);
 extern int (*gPortNetHostSendTo)(uint32_t machine, const void* data, uint32_t size);
 extern int gPortCatchUp;
 extern "C" int syNetPeerAdmit(int machine);   // decomp sys/netpeer.c
+extern "C" unsigned syNetPeerOpenPlayers(void);
+extern "C" int syNetPeerAdd(int machine, unsigned mask);
 extern "C" int syNetPeerCatchingUp(void);
 extern int (*gPortNetHostRecv)(void* buf, uint32_t cap);
 extern int (*gPortNetHostRecvFrom)(void* buf, uint32_t cap, uint32_t* machine);
@@ -323,6 +325,10 @@ extern "C" N64_GAME_EXPORT int n64_game_start(const n64_host* host, const n64_la
         unsigned localMask = 0, remoteMask = 0;
         std::string pads;
         for (uint32_t p = 0; p < launch->player_count && p < 4; p++) {
+            if (launch->players[p].machine == N64_MACHINE_NONE) {   // a CPU nobody plays (joining into CPU slots)
+                pads += std::string(p ? "," : "") + "0";
+                continue;
+            }
             (launch->players[p].local ? localMask : remoteMask) |= 1u << p;
             pads += std::string(p ? "," : "") + std::to_string(launch->players[p].local ? launch->players[p].pad : 0);
         }
@@ -343,7 +349,8 @@ extern "C" N64_GAME_EXPORT int n64_game_start(const n64_host* host, const n64_la
         {
             std::string machineOf;
             for (uint32_t p = 0; p < launch->player_count && p < 4; p++) {
-                machineOf += std::string(p ? "," : "") + std::to_string(launch->players[p].machine);
+                const unsigned m = launch->players[p].machine == N64_MACHINE_NONE ? 0 : launch->players[p].machine;
+                machineOf += std::string(p ? "," : "") + std::to_string(m);
             }
             SetEnv("SSB64_NETPLAY_MACHINE_OF", machineOf);
         }
@@ -399,6 +406,12 @@ extern "C" N64_GAME_EXPORT n64_frame_result n64_game_frame(void) {
 }
 
 /* The session's host: a newcomer takes over the players of `machine` (a device that left; CPU or idle since). */
+/* joining into CPUs nobody played (i64 asks the machine that started the game) */
+extern "C" N64_GAME_EXPORT uint32_t n64_game_open_players(void) { return syNetPeerOpenPlayers(); }
+extern "C" N64_GAME_EXPORT int n64_game_add(uint32_t machine, uint32_t player_mask) {
+    return syNetPeerAdd((int)machine, player_mask);
+}
+
 extern "C" N64_GAME_EXPORT int n64_game_admit(uint32_t machine) {
     return syNetPeerAdmit((int)machine);
 }

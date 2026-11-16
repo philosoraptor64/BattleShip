@@ -396,6 +396,17 @@ N64_GAME_EXPORT int n64_game_dropout(uint32_t player, n64_dropout_action action,
  * it can't now. */
 N64_GAME_EXPORT int n64_game_admit(uint32_t machine);
 
+/* Optional (v2, added 2026-11-16), joining into players nobody has played (CPUs from the start):
+ * n64_game_open_players: the players a newcomer could take over now (bit p = player p; this game's ports),
+ * e.g. CPUs in a match that never had a human. Asked on the machine that started the game. 0 = none.
+ * n64_game_add: the newcomer becomes the new `machine` (the next index) and takes `player_mask` over
+ * (n64net_input_add). The newcomer starts with N64_LAUNCH_JOINING; in its player table those players are its
+ * own, and players nobody plays are listed with machine N64_MACHINE_NONE. Every machine turns the CPUs into
+ * humans at the tick n64net_input_rejoined gives. Returns 0, or nonzero if it can't now. */
+#define N64_MACHINE_NONE 0xFF
+N64_GAME_EXPORT uint32_t n64_game_open_players(void);
+N64_GAME_EXPORT int n64_game_add(uint32_t machine, uint32_t player_mask);
+
 #ifdef __cplusplus
 }
 #endif
