@@ -16,6 +16,8 @@
 extern "C" {
 /* Set by the module while a run uses the host's connection. */
 int (*gPortNetHostSend)(const void* data, uint32_t size) = nullptr;
+int (*gPortNetHostSendTo)(uint32_t machine, const void* data, uint32_t size) = nullptr;   // i64 ABI v2
+int gPortCatchUp = 0;   // a catch-up frame (joined mid-session): no rendering, presenting or sound
 int (*gPortNetHostRecv)(void* buf, uint32_t cap) = nullptr;
 /* i64 ABI v2 (more than two devices): which device a datagram came from (0 = the session's host) */
 int (*gPortNetHostRecvFrom)(void* buf, uint32_t cap, uint32_t* machine) = nullptr;
@@ -79,6 +81,18 @@ extern "C" int port_net_external_send(const uint8_t* data, uint32_t size) {
         if (gPortNetHostSend(buf, n + kFragHeader) < 0) return 0;
     }
     return 1;
+}
+
+/* One small packet to one device only (n64net's input log for a newcomer). Returns 1, or 0 if it can't (then the
+ * caller sends it to everyone). */
+extern "C" int port_net_external_send_to(int machine, const uint8_t* data, uint32_t size) {
+    if (!port_net_external_active() || gPortNetHostSendTo == nullptr || machine < 0) return 0;
+    uint8_t buf[2048];
+    const uint32_t max = gPortNetHostMaxDatagram < sizeof buf ? gPortNetHostMaxDatagram : (uint32_t)sizeof buf;
+    if (size + 1 > max) return 0;
+    buf[0] = kWhole;
+    std::memcpy(buf + 1, data, size);
+    return gPortNetHostSendTo((uint32_t)machine, buf, size + 1) >= 0;
 }
 
 /* Next whole packet into `out` (cap bytes): its size, or -1 if none waiting; *machine = its sender (-1 if

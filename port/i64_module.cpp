@@ -17,6 +17,7 @@
 
 #define N64_GAME_BUILDING_MODULE 1
 #include <atomic>
+#include <chrono>
 #include "i64/n64_game.h"
 
 #include "port_log.h"
@@ -44,6 +45,10 @@ extern void (*gPortHostAudioWrite)(const int16_t* stereo, uint32_t frames, uint3
 extern uint32_t (*gPortHostAudioBuffered)(uint32_t rate);
 /* Online: the host's game channel (port/net/netplay_transport.cpp). */
 extern int (*gPortNetHostSend)(const void* data, uint32_t size);
+extern int (*gPortNetHostSendTo)(uint32_t machine, const void* data, uint32_t size);
+extern int gPortCatchUp;
+extern "C" int syNetPeerAdmit(int machine);   // decomp sys/netpeer.c
+extern "C" int syNetPeerCatchingUp(void);
 extern int (*gPortNetHostRecv)(void* buf, uint32_t cap);
 extern int (*gPortNetHostRecvFrom)(void* buf, uint32_t cap, uint32_t* machine);
 extern uint32_t gPortNetHostMaxDatagram;
@@ -66,7 +71,7 @@ const n64_game_info kInfo = {
     60,
     N64_GAME_INFO_CAN_UNLOCK_ALL,   /* "everything unlocked" (all characters, Mushroom Kingdom, item switch, sound test) */
     /* v2: a device that leaves: the game's own CPU takes its fighter over, or it stays in with nothing pressed */
-    N64_DROPOUT_CAN_CPU | N64_DROPOUT_CAN_IDLE,
+    N64_DROPOUT_CAN_CPU | N64_DROPOUT_CAN_IDLE | N64_DROPOUT_CAN_JOIN,
     4,
 };
 
@@ -289,7 +294,8 @@ extern "C" N64_GAME_EXPORT int n64_game_start(const n64_host* host, const n64_la
         "SSB64_NETPLAY_LOCAL_PLAYER", "SSB64_NETPLAY_REMOTE_PLAYER", "SSB64_NETPLAY_BIND", "SSB64_NETPLAY_PEER",
         "SSB64_NETPLAY_SERVER", "SSB64_NETPLAY_ROOM", "SSB64_NETPLAY_PASSWORD", "SSB64_NETPLAY_SEED",
         "SSB64_NETPLAY_VOICE", "SSB64_NETPLAY_LOBBY", "SSB64_NETPLAY_SESSION", "SSB64_NETPLAY_LOCAL_MASK",
-        "SSB64_NETPLAY_REMOTE_MASK", "SSB64_NETPLAY_PADS", "SSB64_NETPLAY_MACHINES",
+        "SSB64_NETPLAY_REMOTE_MASK", "SSB64_NETPLAY_PADS", "SSB64_NETPLAY_MACHINES", "SSB64_NETPLAY_MACHINE_OF",
+        "SSB64_NETPLAY_JOINING",
     };
     for (const char* v : kNetVars) unsetenv(v);
     gPortNetHostSend = nullptr;
@@ -318,10 +324,19 @@ extern "C" N64_GAME_EXPORT int n64_game_start(const n64_host* host, const n64_la
         SetEnv("SSB64_NETPLAY_REMOTE_MASK", std::to_string(remoteMask));
         SetEnv("SSB64_NETPLAY_PADS", pads);
         SetEnv("SSB64_NETPLAY_MACHINES", std::to_string(launch->num_machines));
+        {
+            std::string machineOf;
+            for (uint32_t p = 0; p < launch->player_count && p < 4; p++) {
+                machineOf += std::string(p ? "," : "") + std::to_string(launch->players[p].machine);
+            }
+            SetEnv("SSB64_NETPLAY_MACHINE_OF", machineOf);
+        }
+        if (launch->flags & N64_LAUNCH_JOINING) SetEnv("SSB64_NETPLAY_JOINING", "1");
         SetEnv("SSB64_NETPLAY_BIND", "0.0.0.0:0");     // unused: i64's channel
         SetEnv("SSB64_NETPLAY_PEER", "0.0.0.0:0");
         if (launch->seed != 0) SetEnv("SSB64_NETPLAY_SEED", std::to_string(launch->seed));
         gPortNetHostSend = host->net_send;
+        gPortNetHostSendTo = host->abi_version >= 2 ? host->net_send_to : nullptr;
         gPortNetHostRecv = host->net_recv;
         gPortNetHostRecvFrom = host->net_recv_from;
         gPortNetHostMaxDatagram = host->net_max_datagram ? host->net_max_datagram : 1200;
@@ -353,7 +368,23 @@ extern "C" N64_GAME_EXPORT n64_frame_result n64_game_frame(void) {
     if (port_net_end_reason()[0]) {
         return N64_GAME_FRAME_EXIT;   // a desync or the friend gone: i64 shows why (n64_game_exit_message)
     }
+    if (syNetPeerCatchingUp()) {
+        /* joined mid-session: replay the host's log, not shown or heard, as many frames as fit in ~14 ms */
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(14);
+        int ok = 1;
+        gPortCatchUp = 1;
+        do {
+            ok = PortRunFrame();
+        } while (ok && syNetPeerCatchingUp() && !port_net_end_reason()[0] && std::chrono::steady_clock::now() < until);
+        gPortCatchUp = 0;
+        return ok ? N64_GAME_FRAME_CONTINUE : N64_GAME_FRAME_EXIT;
+    }
     return PortRunFrame() ? N64_GAME_FRAME_CONTINUE : N64_GAME_FRAME_EXIT;
+}
+
+/* The session's host: a newcomer takes over the players of `machine` (a device that left; CPU or idle since). */
+extern "C" N64_GAME_EXPORT int n64_game_admit(uint32_t machine) {
+    return syNetPeerAdmit((int)machine);
 }
 
 // why frame() ended the game, for i64's menu ("" = the player quit)

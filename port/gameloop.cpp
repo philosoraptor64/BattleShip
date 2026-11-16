@@ -474,6 +474,13 @@ extern "C" void port_submit_display_list(void *dl)
  * thread the JVM tracks. */
 extern "C" void port_drain_pending_display_list(void)
 {
+	{
+		extern int gPortCatchUp;
+		if (gPortCatchUp) {   /* joined mid-session, catching up: nothing is shown */
+			sPendingDisplayList = nullptr;
+			return;
+		}
+	}
 	if (sPendingDisplayList == nullptr) {
 		return;
 	}
@@ -844,7 +851,8 @@ void PortPushFrame(void)
 	 * 0-submit frames can otherwise hold an older swapchain image. Present
 	 * the cached game framebuffer texture through the normal GUI/window path
 	 * without re-running any display list or touching game memory. */
-	if (sDLSubmitsThisFrame == 0) {
+	extern int gPortCatchUp;
+	if (sDLSubmitsThisFrame == 0 && !gPortCatchUp) {
 		bool idlePresented = false;
 		static int sFreezePacing = -1;
 		if (sFreezePacing < 0) {

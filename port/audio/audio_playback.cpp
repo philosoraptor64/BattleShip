@@ -270,8 +270,9 @@ extern "C" void portAudioVoiceKeepAlive(void)
 
 extern "C" void portAudioSubmitFrame(const void *buf, int sampleCount)
 {
-    // Rollback resimulation re-runs frames whose audio already played.
-    if (gPortRollbackResim) {
+    // Rollback resimulation re-runs frames whose audio already played; a newcomer catching up hears nothing.
+    extern int gPortCatchUp;
+    if (gPortRollbackResim || gPortCatchUp) {
         return;
     }
     if (buf == nullptr || sampleCount <= 0) {
