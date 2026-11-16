@@ -78,6 +78,21 @@ const n64_game_info kInfo = {
 /* Survive the reset of the globals between runs (reentry.cpp). */
 #define KEEP __attribute__((section("__DATA,__ssb64keep")))
 KEEP const n64_host* sHost = nullptr;
+
+/* i64's controllers (n64_host.pad_read; i64 docs/controllers.md): pad k of this device -> port k, in place of
+ * libultraship's ControlDeck (libultraship os.cpp gLusHostPadRead), so a controller behaves the same in every game.
+ * Online, the netplay code takes this device's controllers from these ports as before. */
+extern "C" int (*gLusHostPadRead)(int port, uint16_t* button, int8_t* stick_x, int8_t* stick_y);
+static int HostPadRead(int port, uint16_t* button, int8_t* stick_x, int8_t* stick_y) {
+    n64_pad_state st{};
+    if (sHost == nullptr || sHost->pad_read == nullptr || port < 0 || !sHost->pad_read((uint32_t)port, &st)) {
+        return 0;
+    }
+    *button = st.buttons;
+    *stick_x = st.stick_x;
+    *stick_y = st.stick_y;
+    return 1;
+}
 bool sUnlockAll = false;
 extern "C" void port_save_reset_path(void);   // port/port_save.cpp
 extern "C" bool gLusHostPaced; /* libultraship gfx_sdl2.cpp */
@@ -253,6 +268,7 @@ extern "C" N64_GAME_EXPORT int n64_game_start(const n64_host* host, const n64_la
     port_reentry_save_pristine();
 
     sHost = host;
+    gLusHostPadRead = (host->abi_version >= 2 && host->pad_read != nullptr) ? HostPadRead : nullptr;
     gLusHostPaced = (launch->flags & N64_LAUNCH_HOST_PACED) != 0; /* libultraship: i64 paces the frames */
     sPreviewFrames = 0;
     gLusFrameCaptureCallback = host->offer_title_art;
@@ -457,6 +473,7 @@ extern "C" N64_GAME_EXPORT void n64_game_stop(void) {
     port_coroutine_pool_release_for_reentry();   /* (its stacks are in i64's arena) */
     port_reentry_restore_pristine();
     sRunning = false;
+    gLusHostPadRead = nullptr;
     sHost = nullptr;
 }
 
