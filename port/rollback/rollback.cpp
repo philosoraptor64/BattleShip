@@ -64,6 +64,9 @@ void syNetSyncHashTick(uint32_t *out_columns);
 unsigned int syNetInputGetTick(void);
 int syNetPeerCheckLocalPlayer(int player);
 int port_rollback_game_in_battle(void);
+int port_rollback_game_safe(void);
+unsigned int port_rollback_scene_loads(void);
+int syNetPeerSessionCheckActive(void);
 int syNetPeerCheckRollbackEnabled(void);
 void syNetPeerRecordTickHash(void);
 int syNetInputTakeRollbackTick(unsigned int *out_tick);
@@ -169,6 +172,7 @@ uint32_t sValidFrames;    // consecutive frames with a ring snapshot
 int sSyncTestEnabled = -1;
 int sSyncTestDepth = 1;   // frames rewound per check
 bool sSyncTestArmed;
+unsigned int sSyncTestLoads;
 uint32_t sSyncTestFrames;
 uint32_t sSyncTestMismatches;
 double sSaveUsecs, sRestoreUsecs, sResimUsecs;
@@ -277,12 +281,24 @@ extern "C" int port_rollback_synctest_begin(void) {
         portRelocJournalSetEnabled(1);
         port_log("SSB64 Rollback: synctest rewinding %d frame(s) every frame\n", sSyncTestDepth);
     }
-    // Netplay VS battle, past the start barrier.
+    // Netplay VS battle, past the start barrier; with SSB64_ROLLBACK_SYNCTEST_MENUS=1 every frame of an online
+    // session (title, menus, results too). Never rewind across a scene load.
+    static int menus = -1;
+    if (menus < 0) {
+        const char *env = std::getenv("SSB64_ROLLBACK_SYNCTEST_MENUS");
+        menus = (env != nullptr && env[0] == '1') ? 1 : 0;
+    }
+    static unsigned int loads;
+    if (port_rollback_scene_loads() != loads) {
+        loads = port_rollback_scene_loads();
+        sValidFrames = 0;
+    }
     if ((!syNetPeerCheckLocalPlayer(0) && !syNetPeerCheckLocalPlayer(1)) || syNetInputGetTick() < 1 ||
-        !port_rollback_game_in_battle()) {
+        !(port_rollback_game_safe() || (menus && syNetPeerSessionCheckActive()))) {
         sValidFrames = 0;
         return 0;
     }
+    sSyncTestLoads = loads;
     SaveTimed(sRing[sFrame % kRing]);
     sSyncTestArmed = true;
     return 1;
@@ -293,8 +309,9 @@ extern "C" void port_rollback_synctest_end(void (*resimulate_frame)(void)) {
         return;
     }
     sSyncTestArmed = false;
-    if (!port_rollback_game_in_battle()) {
-        sValidFrames = 0; // the frame ended the battle; nothing to compare
+    if (port_rollback_scene_loads() != sSyncTestLoads ||
+        !(port_rollback_game_safe() || (std::getenv("SSB64_ROLLBACK_SYNCTEST_MENUS") && syNetPeerSessionCheckActive()))) {
+        sValidFrames = 0; // the frame ended the battle or changed scenes; nothing to compare
         return;
     }
     syNetSyncHashTick(sRingHash[sFrame % kRing]);
@@ -381,6 +398,11 @@ extern "C" void port_rollback_synctest_end(void (*resimulate_frame)(void)) {
 namespace {
 GameSnapshot sRbRing[kRing];
 uint32_t sRbRingTick[kRing];
+// Frame number of each saved state: menus have frames that read no input (several frames start at one tick), so a
+// rollback re-runs exactly as many frames as were run since that state, not "until the tick comes back".
+uint64_t sRbRingFrame[kRing];
+uint64_t sRbFrameNo;
+unsigned int sRbSceneLoads;
 bool sRbRingCleared;
 bool sRbArmed;
 uint32_t sRbRollbacks, sRbResimFrames, sRbMaxDepth, sRbTooDeep, sRbFrames;
@@ -401,11 +423,16 @@ extern "C" int port_rollback_frame_begin(void (*resimulate_frame)(void)) {
         return 0;
     }
     const uint32_t tick = syNetInputGetTick();
-    if (tick < 1 || !port_rollback_game_in_battle()) {
+    if (tick < 1 || !port_rollback_game_safe()) {
         if (!sRbRingCleared) {
             RbClearRing();
         }
         return 0;
+    }
+    if (port_rollback_scene_loads() != sRbSceneLoads) {
+        // a scene loaded (on confirmed inputs only): nothing before it can be rewound
+        sRbSceneLoads = port_rollback_scene_loads();
+        RbClearRing();
     }
     static bool journaling;
     if (!journaling) {
@@ -426,18 +453,28 @@ extern "C" int port_rollback_frame_begin(void (*resimulate_frame)(void)) {
             port_log("SSB64 Rollback: cannot roll back %u ticks (from %u at %u): no snapshot\n", depth, from, tick);
         } else {
             auto t = std::chrono::steady_clock::now();
+            const uint64_t frames = sRbFrameNo - sRbRingFrame[from % kRing];
             Restore(sRbRing[from % kRing]);
+            for (uint32_t &rt : sRbRingTick) {
+                if (rt != UINT32_MAX && rt > from) {
+                    rt = UINT32_MAX; // re-taken below
+                }
+            }
             gPortRollbackResim = 1;
-            for (uint32_t n = 0; n < kRing && syNetInputGetTick() < tick && port_rollback_game_in_battle(); n++) {
+            for (uint64_t f = sRbRingFrame[from % kRing]; f < sRbFrameNo; f++) {
                 const uint32_t cur = syNetInputGetTick();
-                if (cur != from) {
+                if (sRbRingTick[cur % kRing] != cur) { // the first frame that starts at this tick
                     Save(sRbRing[cur % kRing]);
                     sRbRingTick[cur % kRing] = cur;
+                    sRbRingFrame[cur % kRing] = f;
                 }
                 resimulate_frame();
-                syNetPeerRecordTickHash();
+                if (port_rollback_game_in_battle()) { // (the fighter list is only valid in a battle)
+                    syNetPeerRecordTickHash();
+                }
                 sRbResimFrames++;
             }
+            (void)frames;
             gPortRollbackResim = 0;
             sRbUsecs += UsecsSince(t);
             sRbRollbacks++;
@@ -448,9 +485,13 @@ extern "C" int port_rollback_frame_begin(void (*resimulate_frame)(void)) {
         }
     }
     auto saveStart = std::chrono::steady_clock::now();
-    Save(sRbRing[tick % kRing]);
+    if (sRbRingTick[tick % kRing] != tick) { // keep the first frame that starts at this tick
+        Save(sRbRing[tick % kRing]);
+        sRbRingTick[tick % kRing] = tick;
+        sRbRingFrame[tick % kRing] = sRbFrameNo;
+    }
     sRbSaveUsecs += UsecsSince(saveStart);
-    sRbRingTick[tick % kRing] = tick;
+    sRbFrameNo++;
 
     const uint32_t oldest = (tick >= kRing - 1) ? tick - (kRing - 1) : 0;
     if (sRbRingTick[oldest % kRing] == oldest) {
@@ -465,7 +506,7 @@ extern "C" void port_rollback_frame_end(void) {
         return;
     }
     sRbArmed = false;
-    if (port_rollback_game_in_battle()) {
+    if (port_rollback_game_in_battle()) { // (the fighter list is only valid in a battle)
         syNetPeerRecordTickHash();
     }
     if (++sRbFrames % 600 == 0) {
