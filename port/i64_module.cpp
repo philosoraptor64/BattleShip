@@ -102,18 +102,15 @@ extern "C" bool gLusHostPaced; /* libultraship gfx_sdl2.cpp */
 extern "C" void (*gLusFrameCaptureCallback)(const uint8_t* rgba, uint32_t w, uint32_t h);
 extern "C" std::atomic<int> gLusFrameCaptureRequest;
 static unsigned sPreviewFrames = 0;
-static constexpr unsigned kPreviewFirst = 1800, kPreviewEvery = 3600; /* host frames (60/s) */
 
-/* when to offer a picture: kPreviewFirst, then every kPreviewEvery frames; tests: I64_TEST_PREVIEW_AT="400,700" */
+/* i64 decides when it wants a home-screen picture (todo item 20: one rule in i64 for every game) */
+static volatile int sPreviewWanted = 0;
+extern "C" N64_GAME_EXPORT void n64_game_capture_preview(void) { sPreviewWanted = 1; }
 static bool PreviewDue(unsigned frame) {
-    static const char* at = getenv("I64_TEST_PREVIEW_AT");
-    if (at) {
-        for (const char* p = at; p && *p; p = strchr(p, ',') ? strchr(p, ',') + 1 : nullptr) {
-            if ((unsigned) atoi(p) == frame) return true;
-        }
-        return false;
-    }
-    return frame >= kPreviewFirst && (frame - kPreviewFirst) % kPreviewEvery == 0;
+    (void) frame;
+    if (!sPreviewWanted) return false;
+    sPreviewWanted = 0;
+    return true;
 }
 #if defined(__APPLE__)
 extern "C" uint64_t (*port_coroutine_arena_reserve)(uint64_t size, uint64_t align);   /* coroutine_android.cpp */

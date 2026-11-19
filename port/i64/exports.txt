@@ -12,3 +12,4 @@ _n64_game_admit
 _n64_game_open_players
 _n64_game_add
 _n64_game_set_hidden
+_n64_game_capture_preview
