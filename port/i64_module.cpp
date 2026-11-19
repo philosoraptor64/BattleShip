@@ -380,12 +380,22 @@ extern "C" N64_GAME_EXPORT int n64_game_start(const n64_host* host, const n64_la
 
 extern "C" const char* port_net_end_reason(void);   // port/net/netplay_transport.cpp
 
+extern "C" int gPortHidden;   // port/net/netplay_transport.cpp
+
+/* i64 went out of view (1) or came back (0): keep playing, drawing nothing meanwhile (no GPU work). */
+extern "C" N64_GAME_EXPORT void n64_game_set_hidden(int hidden) {
+    gPortHidden = (sRunning && hidden) ? 1 : 0;
+    if (sRunning && sHost && sHost->log) {
+        sHost->log(hidden ? "ssb64: out of view, still running (nothing drawn)" : "ssb64: back in view");
+    }
+}
+
 extern "C" N64_GAME_EXPORT n64_frame_result n64_game_frame(void) {
     if (!sRunning || sExitRequested) {
         return N64_GAME_FRAME_EXIT;
     }
     ++sPreviewFrames;
-    if (PreviewDue(sPreviewFrames) && gLusFrameCaptureCallback) {
+    if (!gPortHidden && PreviewDue(sPreviewFrames) && gLusFrameCaptureCallback) {
         gLusFrameCaptureRequest = 1;
     }
     if (port_net_end_reason()[0]) {
@@ -472,6 +482,7 @@ extern "C" N64_GAME_EXPORT void n64_game_set_paused(int paused) {
 extern "C" N64_GAME_EXPORT void n64_game_stop(void) {
     gLusFrameCaptureCallback = nullptr;
     gLusFrameCaptureRequest = 0;
+    gPortHidden = 0;
     if (!sRunning) {
         return;
     }

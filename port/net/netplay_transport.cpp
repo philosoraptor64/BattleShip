@@ -17,6 +17,7 @@ extern "C" {
 /* Set by the module while a run uses the host's connection. */
 int (*gPortNetHostSend)(const void* data, uint32_t size) = nullptr;
 int (*gPortNetHostSendTo)(uint32_t machine, const void* data, uint32_t size) = nullptr;   // i64 ABI v2
+int gPortHidden = 0;    // i64 out of view (n64_game_set_hidden): the game runs and sounds, nothing is drawn
 int gPortCatchUp = 0;   // a catch-up frame (joined mid-session): no rendering, presenting or sound
 int (*gPortNetHostRecv)(void* buf, uint32_t cap) = nullptr;
 /* i64 ABI v2 (more than two devices): which device a datagram came from (0 = the session's host) */
