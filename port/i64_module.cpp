@@ -419,6 +419,12 @@ extern "C" N64_GAME_EXPORT int n64_game_add(uint32_t machine, uint32_t player_ma
     return syNetPeerAdd((int)machine, player_mask);
 }
 
+extern "C" int syNetPeerHoldJoin(int machine, int hold);   // decomp sys/netpeer.c
+/* watch first: the newcomer catches up and watches; i64 asks the host's player when it presses Start */
+extern "C" N64_GAME_EXPORT int n64_game_hold_join(uint32_t machine, int hold) {
+    return syNetPeerHoldJoin((int)machine, hold);
+}
+
 extern "C" N64_GAME_EXPORT int n64_game_admit(uint32_t machine) {
     return syNetPeerAdmit((int)machine);
 }
