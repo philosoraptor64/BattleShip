@@ -401,6 +401,9 @@ uint32_t sRbRingTick[kRing];
 // Frame number of each saved state: menus have frames that read no input (several frames start at one tick), so a
 // rollback re-runs exactly as many frames as were run since that state, not "until the tick comes back".
 uint64_t sRbRingFrame[kRing];
+// Scene loads so far when each state was saved: a rollback may not cross a scene load (nothing undoes one), but a
+// state saved after the load is good, even if the load happened inside a replay just before it.
+unsigned int sRbRingLoads[kRing];
 uint64_t sRbFrameNo;
 unsigned int sRbSceneLoads;
 bool sRbRingCleared;
@@ -408,6 +411,12 @@ bool sRbArmed;
 uint32_t sRbRollbacks, sRbResimFrames, sRbMaxDepth, sRbTooDeep, sRbFrames;
 double sRbUsecs;
 double sRbSaveUsecs;
+
+// SSB64_ROLLBACK_TRACE_FRAMES=1: log the tick every live and replayed frame starts at (replays must re-run the same ticks)
+bool RbTraceFrames() {
+    static const bool on = std::getenv("SSB64_ROLLBACK_TRACE_FRAMES") != nullptr;
+    return on;
+}
 
 void RbClearRing() {
     for (uint32_t &t : sRbRingTick) {
@@ -430,9 +439,10 @@ extern "C" int port_rollback_frame_begin(void (*resimulate_frame)(void)) {
         return 0;
     }
     if (port_rollback_scene_loads() != sRbSceneLoads) {
-        // a scene loaded (on confirmed inputs only): nothing before it can be rewound
+        // a scene loaded (on confirmed inputs only): nothing before it can be rewound (the per-state load count
+        // below refuses those). Wiping the whole ring here also dropped states saved after the load, when it
+        // happened inside a replay: a wrong guess right after it then had nothing to roll back to (2026-11-21).
         sRbSceneLoads = port_rollback_scene_loads();
-        RbClearRing();
     }
     static bool journaling;
     if (!journaling) {
@@ -446,7 +456,7 @@ extern "C" int port_rollback_frame_begin(void (*resimulate_frame)(void)) {
     unsigned int from;
     if (syNetInputTakeRollbackTick(&from) && from < tick) {
         const uint32_t depth = tick - from;
-        if (sRbRingTick[from % kRing] != from) {
+        if (sRbRingTick[from % kRing] != from || sRbRingLoads[from % kRing] != port_rollback_scene_loads()) {
             // Older than the ring: the window (SSB64_NETPLAY_ROLLBACK_WINDOW)
             // should make this impossible. The peers have now diverged.
             sRbTooDeep++;
@@ -461,12 +471,22 @@ extern "C" int port_rollback_frame_begin(void (*resimulate_frame)(void)) {
                 }
             }
             gPortRollbackResim = 1;
-            for (uint64_t f = sRbRingFrame[from % kRing]; f < sRbFrameNo; f++) {
+            // Re-run until the tick is back where it was, not a count of frames: how many frames a tick takes
+            // isn't part of the game state (in the menus a frame can wait on a framebuffer the renderer still
+            // holds, and read no input), so a replayed frame can take an input the original frame didn't, and a
+            // frame count then ends a tick late (seen 2026-11-21: "ended at tick 11, expected 10", then DESYNC).
+            const uint64_t maxFrames = 2 * (sRbFrameNo - sRbRingFrame[from % kRing]) + 8;
+            for (uint64_t f = sRbRingFrame[from % kRing], n = 0; syNetInputGetTick() < tick && n < maxFrames; f++, n++) {
                 const uint32_t cur = syNetInputGetTick();
                 if (sRbRingTick[cur % kRing] != cur) { // the first frame that starts at this tick
                     Save(sRbRing[cur % kRing]);
                     sRbRingTick[cur % kRing] = cur;
                     sRbRingFrame[cur % kRing] = f;
+                    sRbRingLoads[cur % kRing] = port_rollback_scene_loads();
+                }
+                if (RbTraceFrames()) {
+                    port_log("SSB64 RbTrace resim frame=%llu tick=%u scene=%u\n", (unsigned long long)f, syNetInputGetTick(),
+                             port_rollback_scene_loads());
                 }
                 resimulate_frame();
                 if (port_rollback_game_in_battle()) { // (the fighter list is only valid in a battle)
@@ -489,8 +509,13 @@ extern "C" int port_rollback_frame_begin(void (*resimulate_frame)(void)) {
         Save(sRbRing[tick % kRing]);
         sRbRingTick[tick % kRing] = tick;
         sRbRingFrame[tick % kRing] = sRbFrameNo;
+        sRbRingLoads[tick % kRing] = port_rollback_scene_loads();
     }
     sRbSaveUsecs += UsecsSince(saveStart);
+    if (RbTraceFrames()) {
+        port_log("SSB64 RbTrace live frame=%llu tick=%u scene=%u\n", (unsigned long long)sRbFrameNo, tick,
+                 port_rollback_scene_loads());
+    }
     sRbFrameNo++;
 
     const uint32_t oldest = (tick >= kRing - 1) ? tick - (kRing - 1) : 0;
